@@ -22,17 +22,23 @@ export default function Arena() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState(null);
+  const [err, setErr] = useState(null);
 
   const load = useCallback(async () => {
     if (!activeChallenge) { setLoading(false); return; }
     setLoading(true);
-    const { data: members } = await supabase
-      .from("challenge_members")
-      .select("user_id, profiles(id, name, weekly_goal)")
-      .eq("challenge_id", activeChallenge.id);
+    setErr(null);
 
-    const people = (members || []).map((m) => m.profiles).filter(Boolean);
-    const ids = people.map((p) => p.id);
+    // 1) member ids for this challenge
+    const { data: cm, error: cmErr } = await supabase
+      .from("challenge_members").select("user_id").eq("challenge_id", activeChallenge.id);
+    const ids = (cm || []).map((r) => r.user_id);
+
+    // 2) their profiles (separate query — challenge_members has no direct FK to profiles)
+    const { data: profRows, error: pErr } = await supabase
+      .from("profiles").select("id, name, weekly_goal")
+      .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+    const people = profRows || [];
     setNames(Object.fromEntries(people.map((p) => [p.id, p.name || "Athlete"])));
 
     const since = toISO(new Date(Date.now() - 21 * 86400000));
@@ -50,6 +56,7 @@ export default function Arena() {
     setBoard(buildLeaderboard(people, logsByUser, winsByUser));
     setWins(winRows);
     setSavedType((logsByUser[user.id] || []).find((l) => l.log_date === toISO(new Date()))?.workout_type || null);
+    if (cmErr || pErr) setErr((cmErr || pErr).message);
     setLoading(false);
   }, [activeChallenge, user]);
 
@@ -57,10 +64,12 @@ export default function Arena() {
 
   async function submitCheckIn(type) {
     setSaving(true);
+    setErr(null);
     const { error } = await supabase
       .from("daily_logs")
       .upsert({ user_id: user.id, log_date: toISO(new Date()), workout_type: type }, { onConflict: "user_id,log_date" });
-    if (!error) setSavedType(type);
+    if (error) setErr(error.message);
+    else setSavedType(type);
     await load();
     setSaving(false);
   }
@@ -108,6 +117,7 @@ export default function Arena() {
 
       <CountdownBell endDate={activeChallenge.end_date} />
       <CheckInCard savedType={savedType} onSubmit={submitCheckIn} saving={saving} />
+      {err && <p className="rounded-xl border border-ember/50 bg-ember/10 px-3 py-2 text-sm text-ember">{err}</p>}
 
       <div className="pt-1">
         <p className="eyebrow mb-2">Standings \u00b7 resets Monday</p>
