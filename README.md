@@ -140,3 +140,39 @@ the media rights first.
 
 To swap to the newer (paid) frontier model, change one line in `api/coach.js`:
 `const MODEL = "gemini-3.5-flash";`
+
+---
+
+## v2 update — what changed
+
+**You only need to run one thing to upgrade your live app:** open Supabase → SQL Editor,
+paste all of `supabase/migration_v2.sql`, and Run. It only *adds* columns/tables, so your
+existing accounts, challenges, and check-ins are untouched. Then push the new code to GitHub
+(Vercel redeploys automatically).
+
+New in v2:
+- **Multiple challenges.** Each has its own name, end date, and goal. Tap the challenge name
+  at the top of the Arena to switch, create, or join another. You only ever see challenges
+  you're a member of. *(This also fixes "friends don't show up" — everyone just joins the
+  same challenge with one shared code instead of each starting their own.)*
+- **Submit button on the daily check-in.** Pick one option, hit Submit — it saves and stays
+  put after a refresh.
+- **Wins feed (brags + PRs).** Post a quick brag (text + optional photo) or a personal record
+  (exercise + weight/reps). Friends in the challenge see them in the Arena feed. Your PR bests
+  show on your Profile.
+- **Light-touch scoring.** Rank = consistency (0–100) + a capped bonus (+3 per PR, +1 per brag,
+  max +15 a week). Training still wins; wins just give a nudge.
+- **Multi-select goals** on the Profile.
+- **Quota-safe Coach.** It no longer fires on every tab open — it caches the day's take and
+  only calls when you tap the button. If Google's free tier is cooling down, you get a friendly
+  "catching his breath" message with a countdown instead of a red error.
+
+### About the photo uploads (optional)
+The migration auto-creates a public `wins` storage bucket with the right permissions, so brag
+photos work out of the box. Text-only brags work regardless — if a photo ever fails to upload,
+the brag still posts.
+
+### About the Coach "quota exceeded" error you saw
+That was the **free Gemini tier's rate limit**, not a bug and not a charge — it resets on its
+own. v2's caching + on-demand calls keep usage tiny for a small group. If you ever outgrow the
+free tier, switch one line in `api/coach.js` to a paid model.

@@ -1,126 +1,148 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
-import { buildLeaderboard, toISO, startOfWeekISO } from "../lib/streak.js";
+import { buildLeaderboard, toISO } from "../lib/streak.js";
+import { loadGroupWins } from "../lib/achievements.js";
 import CountdownBell from "../components/CountdownBell.jsx";
 import CheckInCard from "../components/CheckInCard.jsx";
 import ContenderCard from "../components/ContenderCard.jsx";
+import WinsFeed from "../components/WinsFeed.jsx";
+import WinComposer from "../components/WinComposer.jsx";
+import ChallengeSwitcher from "../components/ChallengeSwitcher.jsx";
+import Sheet from "../components/Sheet.jsx";
 import Loader from "../components/Loader.jsx";
-import { UserPlus, Share2, X } from "lucide-react";
+import { ChevronDown, UserPlus, Share2, Plus, Trophy } from "lucide-react";
 
 export default function Arena() {
-  const { user, profile, challenge, setChallenge, refresh } = useAuth();
+  const { user, activeChallenge } = useAuth();
   const [board, setBoard] = useState([]);
-  const [todayType, setTodayType] = useState(null);
+  const [wins, setWins] = useState([]);
+  const [names, setNames] = useState({});
+  const [savedType, setSavedType] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
+  const [sheet, setSheet] = useState(null);
 
   const load = useCallback(async () => {
-    if (!challenge) {
-      setLoading(false);
-      return;
-    }
+    if (!activeChallenge) { setLoading(false); return; }
     setLoading(true);
-    // members of this challenge + their profiles
     const { data: members } = await supabase
       .from("challenge_members")
       .select("user_id, profiles(id, name, weekly_goal)")
-      .eq("challenge_id", challenge.id);
+      .eq("challenge_id", activeChallenge.id);
 
     const people = (members || []).map((m) => m.profiles).filter(Boolean);
     const ids = people.map((p) => p.id);
+    setNames(Object.fromEntries(people.map((p) => [p.id, p.name || "Athlete"])));
 
-    // logs from start of this week is enough for score; pull 21 days for streaks
-    const since = toISO(new Date(Date.now() - 21 * 86_400_000));
+    const since = toISO(new Date(Date.now() - 21 * 86400000));
     const { data: logs } = await supabase
       .from("daily_logs")
       .select("user_id, log_date, workout_type")
       .in("user_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"])
       .gte("log_date", since);
 
-    const logsByUser = {};
+    const winRows = await loadGroupWins(ids);
+    const logsByUser = {}, winsByUser = {};
     (logs || []).forEach((l) => (logsByUser[l.user_id] ||= []).push(l));
+    winRows.forEach((w) => (winsByUser[w.user_id] ||= []).push(w));
 
-    setBoard(buildLeaderboard(people, logsByUser));
-    const mine = (logsByUser[user.id] || []).find((l) => l.log_date === toISO(new Date()));
-    setTodayType(mine?.workout_type || null);
+    setBoard(buildLeaderboard(people, logsByUser, winsByUser));
+    setWins(winRows);
+    setSavedType((logsByUser[user.id] || []).find((l) => l.log_date === toISO(new Date()))?.workout_type || null);
     setLoading(false);
-  }, [challenge, user]);
+  }, [activeChallenge, user]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  async function pick(type) {
+  async function submitCheckIn(type) {
     setSaving(true);
-    if (type === null) {
-      await supabase.from("daily_logs").delete().eq("user_id", user.id).eq("log_date", toISO(new Date()));
-      setTodayType(null);
-    } else {
-      await supabase
-        .from("daily_logs")
-        .upsert({ user_id: user.id, log_date: toISO(new Date()), workout_type: type }, { onConflict: "user_id,log_date" });
-      setTodayType(type);
-    }
+    const { error } = await supabase
+      .from("daily_logs")
+      .upsert({ user_id: user.id, log_date: toISO(new Date()), workout_type: type }, { onConflict: "user_id,log_date" });
+    if (!error) setSavedType(type);
     await load();
     setSaving(false);
   }
 
-  if (!challenge) return <NoChallenge onDone={refresh} setChallenge={setChallenge} userId={user.id} name={profile?.name} />;
+  if (!activeChallenge)
+    return (
+      <>
+        <div className="screen flex flex-col justify-center text-center">
+          <h1 className="font-display text-4xl uppercase tracking-wide">Pick your fight</h1>
+          <p className="mt-1 text-sm text-muted">Create a challenge or join your friends with a code.</p>
+          <button className="btn-primary mt-5" onClick={() => setSheet("switch")}>Get started</button>
+        </div>
+        {sheet === "switch" && <ChallengeSwitcher onClose={() => setSheet(null)} />}
+      </>
+    );
+
+  const me = board.find((r) => r.id === user.id);
+  const leader = board[0];
+  const crewSessions = board.reduce((s, r) => s + r.days, 0);
 
   return (
     <div className="screen space-y-3">
       <header className="flex items-center justify-between pt-1">
-        <div>
-          <p className="eyebrow">{challenge.name}</p>
-          <h1 className="font-display text-3xl uppercase leading-none tracking-wide">The Arena</h1>
-        </div>
-        <button onClick={() => setShowInvite(true)} className="pill flex items-center gap-1">
-          <UserPlus size={14} /> Invite
+        <button onClick={() => setSheet("switch")} className="min-w-0 text-left">
+          <p className="eyebrow flex items-center gap-1">The Arena <ChevronDown size={12} /></p>
+          <h1 className="truncate font-display text-3xl uppercase leading-none tracking-wide">{activeChallenge.name}</h1>
         </button>
+        <button onClick={() => setSheet("invite")} className="pill flex shrink-0 items-center gap-1"><UserPlus size={14} /> Invite</button>
       </header>
 
-      <CountdownBell endDate={challenge.end_date} />
-      <CheckInCard todayType={todayType} onPick={pick} saving={saving} />
+      <div className="flex items-stretch gap-2">
+        <div className="flex-1 rounded-2xl border border-line bg-surface px-3 py-2.5">
+          <p className="eyebrow">Top dog</p>
+          <p className="truncate font-bold">{leader && leader.total > 0 ? names[leader.id] + " \u00b7 " + leader.total : "Up for grabs"}</p>
+        </div>
+        <div className="flex-1 rounded-2xl border border-line bg-surface px-3 py-2.5">
+          <p className="eyebrow">You</p>
+          <p className="font-bold">{me ? "#" + me.rank + " \u00b7 " + me.total : "\u2014"}</p>
+        </div>
+        <div className="rounded-2xl border border-line bg-surface px-3 py-2.5 text-center">
+          <p className="eyebrow">Crew</p>
+          <p className="font-score font-bold text-gold">{crewSessions}</p>
+        </div>
+      </div>
+
+      <CountdownBell endDate={activeChallenge.end_date} />
+      <CheckInCard savedType={savedType} onSubmit={submitCheckIn} saving={saving} />
 
       <div className="pt-1">
-        <p className="eyebrow mb-2">Standings · resets Monday</p>
-        {loading ? (
-          <Loader label="Counting reps…" />
-        ) : board.length ? (
+        <p className="eyebrow mb-2">Standings \u00b7 resets Monday</p>
+        {loading ? <Loader label="Counting reps\u2026" /> : (
           <div className="space-y-2">
-            {board.map((row) => (
-              <ContenderCard key={row.id} row={row} isMe={row.id === user.id} />
-            ))}
+            {board.map((row) => <ContenderCard key={row.id} row={row} isMe={row.id === user.id} />)}
           </div>
-        ) : (
-          <p className="text-sm text-muted">No contenders yet. Invite your crew.</p>
         )}
       </div>
 
-      {showInvite && (
-        <InviteModal challenge={challenge} onClose={() => setShowInvite(false)} />
-      )}
+      <div className="pt-2">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="eyebrow flex items-center gap-1"><Trophy size={12} /> Wins feed</p>
+          <button onClick={() => setSheet("post")} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Post a win</button>
+        </div>
+        {!loading && <WinsFeed wins={wins} nameOf={(id) => names[id] || "Athlete"} />}
+      </div>
+
+      {sheet === "switch" && <ChallengeSwitcher onClose={() => setSheet(null)} />}
+      {sheet === "post" && <WinComposer onClose={() => setSheet(null)} onPosted={load} />}
+      {sheet === "invite" && <InviteSheet challenge={activeChallenge} onClose={() => setSheet(null)} />}
     </div>
   );
 }
 
-// ---------- invite by code (no email service → stays $0) ----------
-function InviteModal({ challenge, onClose }) {
+function InviteSheet({ challenge, onClose }) {
   const [copied, setCopied] = useState(false);
   const share = async () => {
-    const text = `Join my FitArena challenge "${challenge.name}". Code: ${challenge.invite_code}`;
-    if (navigator.share) {
-      try { await navigator.share({ text }); } catch {}
-    } else {
-      await navigator.clipboard.writeText(challenge.invite_code);
-      setCopied(true);
-    }
+    const text = 'Join my FitArena challenge "' + challenge.name + '". Code: ' + challenge.invite_code;
+    if (navigator.share) { try { await navigator.share({ text }); } catch (e) {} }
+    else { await navigator.clipboard.writeText(challenge.invite_code); setCopied(true); }
   };
   return (
-    <Sheet onClose={onClose} title="Add a friend">
-      <p className="text-sm text-muted">Send them this code. They tap “Join with a code” when they sign up.</p>
+    <Sheet title="Add a friend" onClose={onClose}>
+      <p className="text-sm text-muted">Send this code. They tap "Join with a code" after signing up.</p>
       <div className="mt-3 rounded-xl border border-line bg-surface2 px-4 py-5 text-center">
         <p className="font-score text-4xl font-bold tracking-[0.3em] text-gold">{challenge.invite_code}</p>
       </div>
@@ -128,80 +150,5 @@ function InviteModal({ challenge, onClose }) {
         <Share2 size={16} /> {copied ? "Copied!" : "Share invite"}
       </button>
     </Sheet>
-  );
-}
-
-// ---------- empty state: create or join ----------
-function NoChallenge({ userId, name, onDone, setChallenge }) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-
-  async function create() {
-    setBusy(true); setErr(null);
-    const { data: ch, error } = await supabase
-      .from("challenges")
-      .insert({ name: `${name || "My"}'s Cut`, created_by: userId })
-      .select()
-      .single();
-    if (error) { setErr(error.message); setBusy(false); return; }
-    await supabase.from("challenge_members").insert({ challenge_id: ch.id, user_id: userId });
-    setChallenge(ch);
-    onDone();
-  }
-
-  async function join() {
-    setBusy(true); setErr(null);
-    const { data: cid, error } = await supabase.rpc("join_challenge", { code });
-    if (error) { setErr(error.message); setBusy(false); return; }
-    const { data: ch } = await supabase.from("challenges").select("*").eq("id", cid).single();
-    setChallenge(ch);
-    onDone();
-  }
-
-  return (
-    <div className="screen flex flex-col justify-center space-y-4">
-      <div className="text-center">
-        <h1 className="font-display text-4xl uppercase tracking-wide">Pick your fight</h1>
-        <p className="mt-1 text-sm text-muted">Start a challenge or join your friends’ with a code.</p>
-      </div>
-      <button className="btn-primary w-full" onClick={create} disabled={busy}>
-        Start a new challenge
-      </button>
-      <div className="card space-y-3">
-        <p className="eyebrow">Join with a code</p>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-xl bg-surface2 px-4 py-3 uppercase tracking-widest outline-none placeholder:text-muted"
-            placeholder="ABC123"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            maxLength={6}
-          />
-          <button className="pill pill-on" onClick={join} disabled={busy || code.length < 4}>
-            Join
-          </button>
-        </div>
-        {err && <p className="text-sm text-ember">{err}</p>}
-      </div>
-    </div>
-  );
-}
-
-// ---------- reusable bottom sheet ----------
-function Sheet({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="w-full max-w-[440px] rounded-t-3xl border-t border-line bg-surface p-5 pb-8 animate-rise"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-2xl uppercase tracking-wide">{title}</h2>
-          <button onClick={onClose} className="text-muted"><X size={22} /></button>
-        </div>
-        {children}
-      </div>
-    </div>
   );
 }
