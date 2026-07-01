@@ -122,12 +122,15 @@ comfortably inside every free tier.
 
 ---
 
-## ⚠️ Licensing note on the exercise data
-The dataset (`hasaneyldrm/exercises-dataset`, originally ExerciseDB / AscendAPI) is provided
-for **educational, non-commercial** use, and the media has contested ownership — which is why
-images are loaded from the original CDN at runtime rather than bundled. A private group of
-friends is squarely the intended use. **Do not** ship this commercially without sorting out
-the media rights first.
+## Exercise data & images
+The Playbook uses the **yuhonas/free-exercise-db** dataset (873 exercises), which is released
+into the **public domain (the Unlicense)** — free for any use, no attribution required. Images
+are stable, hotlink-friendly photos served from GitHub via the jsDelivr CDN, with a
+raw.githubusercontent fallback and a lettered placeholder if both miss. No API key, $0.
+
+*(Earlier builds used an ExerciseDB CDN whose free image endpoint is rate-limited and
+"exploration only"; that's why animated GIFs stopped loading. This source trades animation for
+still photos but is reliable and cleanly licensed.)*
 
 ---
 

@@ -1,9 +1,10 @@
-// Loads the trimmed exercise dataset once and caches it in memory.
-// Thumbnails come from the ExerciseDB CDN derived from mediaId.
-// NOTE: the dataset is licensed for educational / non-commercial use. Fine for a
-// private group of friends; don't ship this commercially without sorting media rights.
+// Loads the trimmed exercise dataset (from the public-domain yuhonas/free-exercise-db)
+// once and caches it. Images are stable, free, hotlink-friendly GitHub-hosted photos
+// served via the jsDelivr CDN (with a raw.githubusercontent fallback).
 
 let cache = null;
+const JSDELIVR = "https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db@main/exercises/";
+const RAW = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
 
 export async function loadExercises() {
   if (cache) return cache;
@@ -12,21 +13,26 @@ export async function loadExercises() {
   return cache;
 }
 
-export function mediaUrl(mediaId) {
-  return mediaId ? `https://static.exercisedb.dev/media/${mediaId}.gif` : null;
+// Primary CDN url for an image path like "Air_Bike/0.jpg".
+export function imageUrl(path) {
+  return path ? JSDELIVR + path : null;
+}
+// Fallback url (used by <img onError>) if the CDN misses.
+export function imageFallback(path) {
+  return path ? RAW + path : null;
 }
 
 export function facets(list) {
   const uniq = (k) => [...new Set(list.map((e) => e[k]).filter(Boolean))].sort();
-  return { bodyPart: uniq("bodyPart"), equipment: uniq("equipment"), target: uniq("target") };
+  return { muscle: uniq("muscle"), equipment: uniq("equipment"), category: uniq("category") };
 }
 
-export function filterExercises(list, { q = "", bodyPart = "", equipment = "", target = "" }) {
+export function filterExercises(list, { q = "", muscle = "", equipment = "", category = "" }) {
   const needle = q.trim().toLowerCase();
   return list.filter((e) => {
-    if (bodyPart && e.bodyPart !== bodyPart) return false;
+    if (muscle && e.muscle !== muscle) return false;
     if (equipment && e.equipment !== equipment) return false;
-    if (target && e.target !== target) return false;
+    if (category && e.category !== category) return false;
     if (needle && !e.name.toLowerCase().includes(needle)) return false;
     return true;
   });
