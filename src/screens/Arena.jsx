@@ -11,7 +11,7 @@ import WinComposer from "../components/WinComposer.jsx";
 import ChallengeSwitcher from "../components/ChallengeSwitcher.jsx";
 import Sheet from "../components/Sheet.jsx";
 import Loader from "../components/Loader.jsx";
-import { ChevronDown, UserPlus, Share2, Plus, Trophy } from "lucide-react";
+import { ChevronDown, UserPlus, Share2, Plus, Trophy, UserMinus, Crown } from "lucide-react";
 
 export default function Arena() {
   const { user, activeChallenge } = useAuth();
@@ -109,16 +109,16 @@ export default function Arena() {
       <div className="flex items-stretch gap-2">
         <div className="glass flex-1 rounded-2xl px-3 py-2.5">
           <p className="eyebrow">Top dog</p>
-          <p className="truncate font-bold">{leader && leader.total > 0 ? names[leader.id] + " \u00b7 " + leader.total : "Up for grabs"}</p>
+          <p className="truncate font-bold">{leader && leader.total > 0 ? names[leader.id] + " · " + leader.total : "Up for grabs"}</p>
         </div>
         <div className="glass flex-1 rounded-2xl px-3 py-2.5">
           <p className="eyebrow">You</p>
-          <p className="font-bold">{me ? "#" + me.rank + " \u00b7 " + me.total : "\u2014"}</p>
+          <p className="font-bold">{me ? "#" + me.rank + " · " + me.total : "—"}</p>
         </div>
-        <div className="glass rounded-2xl px-3 py-2.5 text-center">
+        <button onClick={() => setSheet("members")} className="glass rounded-2xl px-3 py-2.5 text-center active:scale-95">
           <p className="eyebrow">Crew</p>
-          <p className="font-score font-bold text-gold">{crewSessions}</p>
-        </div>
+          <p className="font-score font-bold text-gold">{board.length}</p>
+        </button>
       </div>
 
       <CountdownBell endDate={activeChallenge.end_date} />
@@ -126,8 +126,8 @@ export default function Arena() {
       {err && <p className="rounded-xl border border-ember/50 bg-ember/10 px-3 py-2 text-sm text-ember">{err}</p>}
 
       <div className="pt-1">
-        <p className="eyebrow mb-2">Standings \u00b7 resets Monday</p>
-        {loading ? <Loader label="Counting reps\u2026" /> : (
+        <p className="eyebrow mb-2">Standings · resets Monday</p>
+        {loading ? <Loader label="Counting reps…" /> : (
           <div className="space-y-2">
             {board.map((row) => <ContenderCard key={row.id} row={row} isMe={row.id === user.id} />)}
           </div>
@@ -145,7 +145,46 @@ export default function Arena() {
       {sheet === "switch" && <ChallengeSwitcher onClose={() => setSheet(null)} />}
       {sheet === "post" && <WinComposer challengeId={activeChallenge.id} onClose={() => setSheet(null)} onPosted={load} />}
       {sheet === "invite" && <InviteSheet challenge={activeChallenge} onClose={() => setSheet(null)} />}
+      {sheet === "members" && <MembersSheet challenge={activeChallenge} board={board} meId={user.id} sessions={crewSessions} onClose={() => setSheet(null)} onChanged={load} />}
     </div>
+  );
+}
+
+function MembersSheet({ challenge, board, meId, sessions, onClose, onChanged }) {
+  const isAdmin = challenge.created_by === meId;
+  const [busy, setBusy] = useState(null);
+  const [err, setErr] = useState(null);
+  async function remove(id) {
+    setBusy(id); setErr(null);
+    const { error } = await supabase.rpc("remove_member", { c_id: challenge.id, target: id });
+    if (error) setErr(error.message);
+    setBusy(null); onChanged();
+  }
+  return (
+    <Sheet title="Crew" onClose={onClose}>
+      <p className="mb-3 text-sm text-muted">{board.length} in "{challenge.name}" · {sessions} sessions this week</p>
+      <div className="space-y-2">
+        {board.map((m) => {
+          const owner = m.id === challenge.created_by;
+          return (
+            <div key={m.id} className="flex items-center gap-3 rounded-xl bg-surface2 px-3 py-2.5">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gold font-bold text-ink">{(m.name || "A")[0].toUpperCase()}</div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-bold">{m.name || "Athlete"}{m.id === meId && <span className="text-xs font-normal text-mint"> you</span>}</p>
+                {owner && <p className="flex items-center gap-1 text-[11px] text-muted"><Crown size={11} className="text-gold" /> Creator</p>}
+              </div>
+              {isAdmin && m.id !== meId && (
+                <button onClick={() => remove(m.id)} disabled={busy === m.id} className="flex items-center gap-1 text-sm text-ember active:scale-95 disabled:opacity-50">
+                  <UserMinus size={16} /> Remove
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {err && <p className="mt-2 text-sm text-ember">{err}</p>}
+      {!isAdmin && <p className="mt-3 text-[11px] text-muted">Only the challenge creator can remove members.</p>}
+    </Sheet>
   );
 }
 

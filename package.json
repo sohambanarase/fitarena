@@ -1,60 +1,27 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { supabase } from "../lib/supabase.js";
-
-const Ctx = createContext(null);
-export const useAuth = () => useContext(Ctx);
-const ACTIVE_KEY = "fitarena.activeChallenge";
-
-export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [challenges, setChallenges] = useState([]);
-  const [activeId, setActiveId] = useState(() => localStorage.getItem(ACTIVE_KEY) || null);
-  const [loading, setLoading] = useState(true);
-
-  const hydrate = useCallback(async (u) => {
-    const uid = u?.id;
-    if (!uid) { setProfile(null); setChallenges([]); return; }
-
-    // 1) profile — self-heal if it's missing (e.g. signed up before setup, or trigger missed)
-    let { data: p } = await supabase.from("profiles").select("*").eq("id", uid).single();
-    if (!p) {
-      const fallbackName = u.user_metadata?.name || u.email?.split("@")[0] || "Athlete";
-      const { data: created } = await supabase
-        .from("profiles").upsert({ id: uid, name: fallbackName }).select().single();
-      p = created;
-    }
-    setProfile(p || null);
-
-    // 2) my challenges
-    const { data: cm } = await supabase
-      .from("challenge_members").select("challenges(*)").eq("user_id", uid).order("joined_at", { ascending: true });
-    const seen = new Set();
-    const list = (cm || []).map((r) => r.challenges).filter((c) => c && !seen.has(c.id) && seen.add(c.id));
-    setChallenges(list);
-    setActiveId((cur) => (list.some((c) => c.id === cur) ? cur : list[0]?.id || null));
-  }, []);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      hydrate(data.session?.user).finally(() => setLoading(false));
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      hydrate(s?.user);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, [hydrate]);
-
-  useEffect(() => { if (activeId) localStorage.setItem(ACTIVE_KEY, activeId); }, [activeId]);
-
-  const activeChallenge = challenges.find((c) => c.id === activeId) || null;
-  const refresh = useCallback(() => hydrate(session?.user), [hydrate, session]);
-
-  const value = {
-    session, user: session?.user || null, profile, challenges, activeChallenge,
-    setActiveId, loading, refresh, signOut: () => supabase.auth.signOut(),
-  };
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+{
+  "name": "fitarena",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "data": "node scripts/build-exercises.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "lucide-react": "^0.400.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.7",
+    "vite": "^5.3.4"
+  }
 }

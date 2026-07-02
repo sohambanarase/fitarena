@@ -72,7 +72,7 @@ export default function Coach() {
       if (res.status === 429 || data.rateLimited) {
         const wait = data.retryAfter || 60;
         setCooldown(wait);
-        setState({ loading: false, soft: "Coach is catching his breath \u2014 the free AI tier has a short cooldown. Try again in about " + wait + "s." });
+        setState({ loading: false, soft: "Coach is catching his breath — the free AI tier has a short cooldown. Try again in about " + wait + "s." });
         return;
       }
       if (!res.ok) throw new Error(data.error || "Coach is offline");
@@ -101,10 +101,10 @@ export default function Coach() {
           <span className={"grid h-9 w-9 place-items-center rounded-full " + (crushing ? "bg-mint text-ink" : "bg-ember text-ink")}>
             <Flame size={18} />
           </span>
-          <p className="font-bold">{state.loading ? "Reading your tape\u2026" : crushing ? "TOAST" : hasTake ? "ROAST" : "Coach"}</p>
+          <p className="font-bold">{state.loading ? "Reading your tape…" : crushing ? "TOAST" : hasTake ? "ROAST" : "Coach"}</p>
         </div>
 
-        {state.loading ? <Loader label="Cooking up a take\u2026" />
+        {state.loading ? <Loader label="Cooking up a take…" />
           : state.soft ? <p className="text-sm text-muted">{state.soft}</p>
           : state.error ? <p className="text-sm text-ember">{state.error}</p>
           : hasTake ? <p className="text-lg leading-snug">{state.message}</p>

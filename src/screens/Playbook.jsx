@@ -31,7 +31,7 @@ export default function Playbook() {
   );
   useEffect(() => setLimit(30), [q, muscle, equipment, category]);
 
-  if (!all) return <div className="screen"><Loader label="Opening the playbook\u2026" /></div>;
+  if (!all) return <div className="screen"><Loader label="Opening the playbook…" /></div>;
 
   return (
     <div className="screen space-y-3">
@@ -95,7 +95,7 @@ function Card({ ex, onClick }) {
       <ExImg path={ex.images[0]} name={ex.name} className="aspect-square h-auto w-full object-cover" />
       <div className="p-2">
         <p className="truncate text-sm font-bold capitalize">{ex.name}</p>
-        <p className="truncate text-[11px] capitalize text-muted">{ex.muscle} \u00b7 {ex.equipment}</p>
+        <p className="truncate text-[11px] capitalize text-muted">{ex.muscle} · {ex.equipment}</p>
       </div>
     </button>
   );

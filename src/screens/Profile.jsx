@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy, Moon, Sun } from "lucide-react";
+import { LogOut, Trophy, Moon, Sun, Bell } from "lucide-react";
 import { currentTheme, applyTheme } from "../lib/theme.js";
+import { pushSupported, isStandalone, pushStatus, enablePush, disablePush } from "../lib/push.js";
 
 const GOALS = ["Lose fat", "Build muscle", "Recomp", "Stay consistent", "Get stronger", "Run more"];
 
@@ -15,6 +16,22 @@ export default function Profile() {
   const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState(currentTheme());
   const switchTheme = (t) => { applyTheme(t); setTheme(t); };
+  const [pushState, setPushState] = useState("loading");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushErr, setPushErr] = useState(null);
+  const needsInstall = pushSupported() && !isStandalone();
+  useEffect(() => { pushStatus().then(setPushState); }, []);
+  async function enableNotifs() {
+    setPushBusy(true); setPushErr(null);
+    try { await enablePush(user.id); setPushState("on"); }
+    catch (e) { setPushErr(e.message || "Couldn't enable notifications."); setPushState(await pushStatus()); }
+    setPushBusy(false);
+  }
+  async function disableNotifs() {
+    setPushBusy(true);
+    try { await disablePush(); } catch {}
+    setPushState("off"); setPushBusy(false);
+  }
 
   useEffect(() => {
     if (profile)
@@ -70,13 +87,33 @@ export default function Profile() {
         </div>
       </div>
 
+      <div className="card">
+        <p className="eyebrow flex items-center gap-1"><Bell size={12} /> Notifications</p>
+        {pushState === "unsupported" ? (
+          <p className="mt-2 text-sm text-muted">This browser doesn't support push notifications.</p>
+        ) : pushState === "on" ? (
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-sm text-muted">On — daily reminder and nudges are live.</p>
+            <button onClick={disableNotifs} disabled={pushBusy} className="pill shrink-0">Turn off</button>
+          </div>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-muted">A daily check-in reminder, plus a nudge when someone posts a win, joins, or passes you on the board.</p>
+            <button onClick={enableNotifs} disabled={pushBusy} className="btn-primary mt-3 w-full">{pushBusy ? "Enabling…" : "Enable notifications"}</button>
+            {needsInstall && <p className="mt-2 text-[11px] text-muted">On iPhone: add FitArena to your home screen and open it from that icon first, then enable.</p>}
+            {pushState === "denied" && <p className="mt-2 text-[11px] text-ember">Notifications are blocked. Allow them for FitArena in your settings, then try again.</p>}
+          </>
+        )}
+        {pushErr && <p className="mt-2 text-[11px] text-ember">{pushErr}</p>}
+      </div>
+
       {delta !== null && (
         <div className="card flex items-center justify-between">
           <div>
             <p className="eyebrow">Weight change</p>
             <p className="font-score text-3xl font-bold text-gold">{delta > 0 ? "+" : ""}{delta}<span className="text-base text-muted"> kg</span></p>
           </div>
-          <p className="text-right text-sm text-muted">{form.start_weight_kg} \u2192 {form.current_weight_kg} kg</p>
+          <p className="text-right text-sm text-muted">{form.start_weight_kg} → {form.current_weight_kg} kg</p>
         </div>
       )}
 
@@ -95,7 +132,7 @@ export default function Profile() {
             ))}
           </div>
         </Field>
-        <button className="btn-primary w-full" onClick={save} disabled={busy}>{busy ? "Saving\u2026" : saved ? "Saved \u2713" : "Save"}</button>
+        <button className="btn-primary w-full" onClick={save} disabled={busy}>{busy ? "Saving…" : saved ? "Saved ✓" : "Save"}</button>
       </div>
 
       <div className="card">
@@ -105,11 +142,11 @@ export default function Profile() {
             {prs.map((w) => (
               <div key={w.id} className="flex items-center justify-between border-b border-line/60 pb-1.5 last:border-0">
                 <span className="capitalize">{w.exercise}</span>
-                <span className="font-score text-gold">{w.weight_kg ? w.weight_kg + "kg" : ""}{w.reps ? " \u00d7 " + w.reps : ""}</span>
+                <span className="font-score text-gold">{w.weight_kg ? w.weight_kg + "kg" : ""}{w.reps ? " × " + w.reps : ""}</span>
               </div>
             ))}
           </div>
-        ) : <p className="mt-1 text-sm text-muted">No PRs yet. Log one from the Arena \u2192 Post a win.</p>}
+        ) : <p className="mt-1 text-sm text-muted">No PRs yet. Log one from the Arena → Post a win.</p>}
       </div>
 
       {activeChallenge && (
