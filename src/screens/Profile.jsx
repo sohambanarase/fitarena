@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy } from "lucide-react";
+import { LogOut, Trophy, Moon, Sun } from "lucide-react";
+import { currentTheme, applyTheme } from "../lib/theme.js";
 
 const GOALS = ["Lose fat", "Build muscle", "Recomp", "Stay consistent", "Get stronger", "Run more"];
 
@@ -12,6 +13,8 @@ export default function Profile() {
   const [prs, setPrs] = useState([]);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [theme, setTheme] = useState(currentTheme());
+  const switchTheme = (t) => { applyTheme(t); setTheme(t); };
 
   useEffect(() => {
     if (profile)
@@ -54,6 +57,18 @@ export default function Profile() {
         <p className="eyebrow">{user.email}</p>
         <h1 className="font-display text-3xl uppercase leading-none tracking-wide">Profile</h1>
       </header>
+
+      <div className="card">
+        <p className="eyebrow">Appearance</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button onClick={() => switchTheme("dark")} className={"flex items-center justify-center gap-2 rounded-xl py-2.5 font-bold transition " + (theme === "dark" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
+            <Moon size={16} /> Dark
+          </button>
+          <button onClick={() => switchTheme("light")} className={"flex items-center justify-center gap-2 rounded-xl py-2.5 font-bold transition " + (theme === "light" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
+            <Sun size={16} /> Light
+          </button>
+        </div>
+      </div>
 
       {delta !== null && (
         <div className="card flex items-center justify-between">
@@ -109,7 +124,6 @@ export default function Profile() {
         <LogOut size={16} /> Sign out
       </button>
 
-      <style>{`.inp{width:100%;border-radius:.75rem;background:#272231;padding:.7rem 1rem;outline:none}`}</style>
     </div>
   );
 }

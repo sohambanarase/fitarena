@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
@@ -10,6 +10,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="FitArena" />
     <title>FitArena</title>
+    <script>
+      try {
+        var t = localStorage.getItem("fitarena.theme");
+        if (t === "light") {
+          document.documentElement.classList.add("light");
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute("content", "#F5F6F9");
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

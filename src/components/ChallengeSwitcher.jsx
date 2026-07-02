@@ -83,7 +83,6 @@ function CreateForm({ userId, name, onDone, onBack }) {
         <button className="pill" onClick={onBack}>Back</button>
         <button className="btn-primary flex-1" onClick={create} disabled={busy}>{busy ? "Creating…" : "Create challenge"}</button>
       </div>
-      <style>{`.inp{width:100%;border-radius:.75rem;background:#272231;padding:.7rem 1rem;outline:none}`}</style>
     </div>
   );
 }

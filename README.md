@@ -225,3 +225,54 @@ Then push the code and let Vercel redeploy.
 - Exercise goals track your **best logged weight** and complete at the target.
 - Each set stores **weight + optional reps**.
 - Logging the same exercise twice in one day **merges** into one row.
+
+---
+
+## Running it locally in VS Code
+
+You only need this if you want to make changes yourself. If you just use the deployed site, skip it.
+
+1. **Install Node.js** (the LTS version) from nodejs.org — this gives you `npm`.
+2. **Open the project** in VS Code: File → Open Folder → the unzipped `fitarena` folder.
+3. **Open a terminal** in VS Code (Terminal → New Terminal) and run:
+   ```bash
+   npm install        # one time — downloads dependencies
+   cp .env.example .env   # then paste your 3 keys into .env
+   npm run dev        # starts the app at http://localhost:5173
+   ```
+4. Edit files under `src/` — the browser auto-refreshes on save.
+5. **One caveat:** `npm run dev` doesn't run the `/api/coach` function, so the AI Coach tab won't
+   work locally. Either test the Coach on the deployed site, or run `npx vercel dev` instead of
+   `npm run dev` (that serves the app + the function together).
+
+To ship a change: save your files, upload the changed files to GitHub (or use VS Code's Source
+Control panel if you set up git), and Vercel redeploys automatically.
+
+---
+
+## v5 update
+
+**Database step:** run `supabase/migration_v5.sql` (additive, safe). Then push the code.
+
+- **Exercise search inside the log** — after picking a body-part category, a search bar at the top
+  filters that list instantly. The main log screen also still has a "search any exercise" box.
+- **Exercise thumbnails** — a compact image sits next to each exercise name in the pickers, log
+  rows, planner, and goal search, without changing the row size.
+- **Workout Planner** — a second tab inside Grind. Build reusable templates ("Push Day", "Leg
+  Day") with exercises, sets, reps, and target weights. Edit, duplicate, or delete them, and hit
+  **Start** to review/tweak today's weights and log the whole session in one go.
+
+---
+
+## v6 update — Light theme
+
+**No database step** — this is frontend only. Just push the code.
+
+- **Theme toggle** in Profile → Appearance (Dark / Light). Your choice is saved and reloads
+  automatically next visit (applied before first paint, so no flash).
+- **Light theme** is its own designed experience, not an inversion: soft off-white canvas, clean
+  white frosted cards with gentle shadows, spacing over heavy borders, and a **tri-accent** system —
+  indigo (primary actions, key stats), emerald (progress, wins), coral (energy, alerts). Smooth
+  cross-fade when you switch.
+- Under the hood, colours are now CSS variables, so both themes share one codebase and every
+  component adapts automatically.

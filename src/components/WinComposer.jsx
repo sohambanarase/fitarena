@@ -75,7 +75,6 @@ export default function WinComposer({ challengeId, onClose, onPosted }) {
       <button className="btn-primary mt-3 w-full" onClick={submit} disabled={busy || !canPost}>
         {busy ? "Posting…" : tab === "pr" ? "Log PR (+3)" : "Post brag (+1)"}
       </button>
-      <style>{`.inp{width:100%;border-radius:.75rem;background:#272231;padding:.7rem 1rem;outline:none}`}</style>
     </Sheet>
   );
 }

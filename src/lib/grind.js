@@ -53,3 +53,22 @@ export function setsOf(entry) {
   if (entry.weight_kg || entry.reps) return [{ weight: entry.weight_kg || 0, reps: entry.reps || null }];
   return [];
 }
+
+// ---- Workout plans (templates) ----
+export async function loadPlans(userId) {
+  const { data } = await supabase.from("workout_plans").select("*").eq("user_id", userId).order("created_at", { ascending: true });
+  return data || [];
+}
+export async function savePlan(plan) {
+  if (plan.id) return supabase.from("workout_plans").update({ name: plan.name, exercises: plan.exercises }).eq("id", plan.id);
+  return supabase.from("workout_plans").insert({ user_id: plan.user_id, name: plan.name, exercises: plan.exercises });
+}
+export async function deletePlan(id) { return supabase.from("workout_plans").delete().eq("id", id); }
+
+// Log every exercise in a plan onto a given day (each with its sets/reps/weight).
+export async function logPlan(userId, date, items) {
+  for (const it of items) {
+    const sets = Array.from({ length: Math.max(1, it.sets || 1) }, () => ({ weight: Number(it.weight) || 0, reps: it.reps == null || it.reps === "" ? null : Number(it.reps) }));
+    await logExercise(userId, date, it.exercise, sets);
+  }
+}

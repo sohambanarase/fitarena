@@ -4,60 +4,103 @@
 @tailwind utilities;
 
 @layer base {
-  html, body, #root { height: 100%; }
-  body {
-    @apply bg-ink text-paper font-body antialiased;
-    /* ambient ring glow behind everything — the "fight night" atmosphere, kept subtle */
-    background-image:
+  /* ---------- DARK (default): fight-night ---------- */
+  :root {
+    --c-ink: 18 16 26;
+    --c-surface: 28 25 37;
+    --c-surface2: 39 34 49;
+    --c-line: 51 44 64;
+    --c-gold: 245 196 81;      /* primary: championship gold */
+    --c-goldDim: 202 162 63;
+    --c-ember: 255 84 112;     /* attention / roast */
+    --c-mint: 70 224 176;      /* success / progress */
+    --c-paper: 244 239 230;    /* text */
+    --c-muted: 154 147 166;
+    --bg-grad:
       radial-gradient(120% 60% at 50% -10%, rgba(245,196,81,.10), transparent 60%),
       radial-gradient(80% 50% at 100% 110%, rgba(70,224,176,.06), transparent 60%);
-    background-attachment: fixed;
+    --shadow-card: 0 10px 30px -12px rgba(0,0,0,.6);
+    --glass-bg: 28 25 37;
+    --glass-alpha: .55;
+    --hl: rgba(255,255,255,.06);
   }
-  /* the app is a phone-shaped column even on desktop — native-app feel, not a stretched dashboard */
+
+  /* ---------- LIGHT: fresh, premium, tri-accent (indigo / emerald / coral) ---------- */
+  .light {
+    --c-ink: 245 246 249;      /* soft off-white canvas */
+    --c-surface: 255 255 255;  /* clean white cards */
+    --c-surface2: 238 240 245; /* subtle fills & inputs */
+    --c-line: 226 229 236;     /* hairline separation */
+    --c-gold: 79 70 229;       /* primary: indigo */
+    --c-goldDim: 67 56 202;
+    --c-ember: 244 63 94;      /* attention / roast: coral */
+    --c-mint: 5 150 105;       /* success / progress: emerald */
+    --c-paper: 23 21 31;       /* near-black text */
+    --c-muted: 106 101 119;
+    --bg-grad:
+      radial-gradient(120% 60% at 50% -10%, rgba(79,70,229,.06), transparent 60%),
+      radial-gradient(90% 50% at 100% 110%, rgba(244,63,94,.05), transparent 60%);
+    --shadow-card: 0 8px 24px -10px rgba(31,29,58,.14);
+    --glass-bg: 255 255 255;
+    --glass-alpha: .70;
+    --hl: rgba(255,255,255,.6);
+  }
+
+  html, body, #root { height: 100%; }
+  body {
+    @apply text-paper font-body antialiased;
+    background-color: rgb(var(--c-ink));
+    background-image: var(--bg-grad);
+    background-attachment: fixed;
+    transition: background-color .35s ease, color .35s ease;
+  }
   #root { display: flex; justify-content: center; }
 }
 
 @layer components {
-  .phone {
-    @apply w-full max-w-[440px] min-h-full relative flex flex-col;
-  }
+  .phone { @apply relative flex min-h-full w-full max-w-[440px] flex-col; }
   .screen {
     @apply flex-1 overflow-y-auto px-4 pb-28;
     padding-top: max(0.75rem, env(safe-area-inset-top));
   }
+
   .card {
     @apply rounded-2xl p-4;
-    background: rgba(28,25,37,.6);
+    background-color: rgb(var(--c-surface) / .72);
     backdrop-filter: blur(14px) saturate(140%);
     -webkit-backdrop-filter: blur(14px) saturate(140%);
-    border: 1px solid rgba(255,255,255,.07);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+    border: 1px solid rgb(var(--c-line) / .7);
+    box-shadow: inset 0 1px 0 var(--hl), var(--shadow-card);
+    transition: background-color .35s ease, border-color .35s ease, box-shadow .35s ease;
   }
-  /* liquid-glass surfaces: translucent, blurred, with a faint top highlight */
   .glass {
-    background: rgba(28, 25, 37, 0.55);
+    background-color: rgb(var(--glass-bg) / var(--glass-alpha));
     backdrop-filter: blur(20px) saturate(150%);
     -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 30px -12px rgba(0,0,0,.6);
+    border: 1px solid rgb(var(--c-line) / .6);
+    box-shadow: inset 0 1px 0 var(--hl), var(--shadow-card);
+    transition: background-color .35s ease, border-color .35s ease;
   }
   .glass-strong {
-    background: rgba(20, 18, 28, 0.72);
+    background-color: rgb(var(--glass-bg) / calc(var(--glass-alpha) + 0.18));
     backdrop-filter: blur(24px) saturate(160%);
     -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid rgb(var(--c-line) / .6);
+    transition: background-color .35s ease, border-color .35s ease;
   }
 
-  .eyebrow {
-    @apply text-[11px] font-bold uppercase tracking-[0.18em] text-muted;
+  .eyebrow { @apply text-[11px] font-bold uppercase tracking-[0.18em] text-muted; }
+  .btn-primary { @apply rounded-xl bg-gold px-4 py-3 font-bold text-ink transition active:scale-[.98] disabled:opacity-50; }
+  .pill { @apply whitespace-nowrap rounded-full border border-line px-3 py-1 text-xs font-semibold text-muted transition active:scale-95; }
+  .pill-on { @apply border-gold bg-gold text-ink; }
+
+  .inp {
+    @apply w-full rounded-xl px-4 py-3 outline-none;
+    background-color: rgb(var(--c-surface2));
+    color: rgb(var(--c-paper));
+    transition: background-color .35s ease, color .35s ease;
   }
-  .btn-primary {
-    @apply bg-gold text-ink font-bold rounded-xl px-4 py-3 active:scale-[.98] transition disabled:opacity-50;
-  }
-  .pill {
-    @apply text-xs font-semibold rounded-full px-3 py-1 border border-line text-muted active:scale-95 transition whitespace-nowrap;
-  }
-  .pill-on { @apply bg-gold text-ink border-gold; }
+  .inp::placeholder { color: rgb(var(--c-muted)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
