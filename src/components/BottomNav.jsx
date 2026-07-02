@@ -1,8 +1,9 @@
 import { NavLink } from "react-router-dom";
-import { Swords, Flame, BookOpen, User } from "lucide-react";
+import { Swords, Target, Flame, BookOpen, User } from "lucide-react";
 
 const tabs = [
   { to: "/", label: "Arena", Icon: Swords, end: true },
+  { to: "/grind", label: "Grind", Icon: Target },
   { to: "/coach", label: "Coach", Icon: Flame },
   { to: "/playbook", label: "Playbook", Icon: BookOpen },
   { to: "/profile", label: "Profile", Icon: User },
@@ -10,7 +11,7 @@ const tabs = [
 
 export default function BottomNav() {
   return (
-    <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[440px] border-t border-line bg-ink/95 backdrop-blur px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] z-50">
+    <nav className="glass-strong fixed bottom-0 left-1/2 z-50 w-full max-w-[440px] -translate-x-1/2 px-1 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <ul className="flex justify-around">
         {tabs.map(({ to, label, Icon, end }) => (
           <li key={to}>
@@ -18,14 +19,12 @@ export default function BottomNav() {
               to={to}
               end={end}
               className={({ isActive }) =>
-                `flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-semibold transition ${
-                  isActive ? "text-gold" : "text-muted"
-                }`
+                `flex flex-col items-center gap-1 px-2 py-1 text-[10px] font-semibold transition ${isActive ? "text-gold" : "text-muted"}`
               }
             >
               {({ isActive }) => (
                 <>
-                  <Icon size={22} strokeWidth={isActive ? 2.6 : 2} />
+                  <Icon size={21} strokeWidth={isActive ? 2.6 : 2} />
                   {label}
                 </>
               )}

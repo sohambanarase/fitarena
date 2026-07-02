@@ -6,7 +6,7 @@ import { toISO } from "../lib/streak.js";
 import { Image as ImageIcon } from "lucide-react";
 
 // Post a brag (text + optional photo) or a PR (exercise + weight/reps).
-export default function WinComposer({ onClose, onPosted }) {
+export default function WinComposer({ challengeId, onClose, onPosted }) {
   const { user } = useAuth();
   const [tab, setTab] = useState("brag");
   const [text, setText] = useState("");
@@ -25,8 +25,8 @@ export default function WinComposer({ onClose, onPosted }) {
       }
       const win =
         tab === "brag"
-          ? { user_id: user.id, kind: "brag", text: text.trim() || "Showed up. 💪", photo_url, log_date: toISO(new Date()) }
-          : { user_id: user.id, kind: "pr", exercise: pr.exercise.trim(), weight_kg: num(pr.weight_kg), reps: num(pr.reps), text: text.trim() || null, log_date: toISO(new Date()) };
+          ? { user_id: user.id, kind: "brag", challenge_id: challengeId, text: text.trim() || "Showed up. 💪", photo_url, log_date: toISO(new Date()) }
+          : { user_id: user.id, kind: "pr", challenge_id: challengeId, exercise: pr.exercise.trim(), weight_kg: num(pr.weight_kg), reps: num(pr.reps), text: text.trim() || null, log_date: toISO(new Date()) };
       const { error } = await postWin(win);
       if (error) throw error;
       onPosted?.();

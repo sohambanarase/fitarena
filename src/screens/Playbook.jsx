@@ -14,7 +14,17 @@ export default function Playbook() {
 
   useEffect(() => { loadExercises().then(setAll); }, []);
 
-  const f = useMemo(() => (all ? facets(all) : null), [all]);
+  const f = useMemo(() => {
+    if (!all) return { muscle: [], equipment: [], category: [] };
+    const uniq = (list, k) => [...new Set(list.map((e) => e[k]).filter(Boolean))].sort();
+    // Each facet's options reflect the OTHER active filters + search, so you never
+    // get a dead-end empty combination. The currently selected value is always kept.
+    return {
+      muscle: uniq(filterExercises(all, { q, equipment, category }), "muscle"),
+      equipment: uniq(filterExercises(all, { q, muscle, category }), "equipment"),
+      category: uniq(filterExercises(all, { q, muscle, equipment }), "category"),
+    };
+  }, [all, q, muscle, equipment, category]);
   const results = useMemo(
     () => (all ? filterExercises(all, { q, muscle, equipment, category }) : []),
     [all, q, muscle, equipment, category]
@@ -57,11 +67,13 @@ export default function Playbook() {
 }
 
 function FilterRow({ label, value, set, options }) {
+  // ensure the active selection is always present so the user can turn it off
+  const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
       <span className="self-center text-[11px] font-bold uppercase tracking-wider text-muted">{label}</span>
       <button className={"pill " + (value === "" ? "pill-on" : "")} onClick={() => set("")}>All</button>
-      {options.map((o) => (
+      {opts.map((o) => (
         <button key={o} className={"pill capitalize " + (value === o ? "pill-on" : "")} onClick={() => set(o)}>{o}</button>
       ))}
     </div>

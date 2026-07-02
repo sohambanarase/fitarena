@@ -2,15 +2,17 @@
 import { supabase } from "./supabase.js";
 import { toISO } from "./streak.js";
 
-export async function loadGroupWins(userIds, sinceDays = 21) {
+export async function loadGroupWins(userIds, challengeId = null, sinceDays = 21) {
   if (!userIds.length) return [];
   const since = toISO(new Date(Date.now() - sinceDays * 86_400_000));
-  const { data } = await supabase
+  let q = supabase
     .from("achievements")
-    .select("id, user_id, kind, text, exercise, weight_kg, reps, photo_url, log_date, created_at")
+    .select("id, user_id, kind, text, exercise, weight_kg, reps, photo_url, challenge_id, log_date, created_at")
     .in("user_id", userIds)
     .gte("log_date", since)
     .order("created_at", { ascending: false });
+  if (challengeId) q = q.eq("challenge_id", challengeId);
+  const { data } = await q;
   return data || [];
 }
 

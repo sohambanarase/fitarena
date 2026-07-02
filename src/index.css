@@ -22,11 +22,32 @@
     @apply w-full max-w-[440px] min-h-full relative flex flex-col;
   }
   .screen {
-    @apply flex-1 overflow-y-auto px-4 pt-3 pb-28; /* pb leaves room for bottom nav */
+    @apply flex-1 overflow-y-auto px-4 pb-28;
+    padding-top: max(0.75rem, env(safe-area-inset-top));
   }
   .card {
-    @apply bg-surface rounded-2xl border border-line p-4;
+    @apply rounded-2xl p-4;
+    background: rgba(28,25,37,.6);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
   }
+  /* liquid-glass surfaces: translucent, blurred, with a faint top highlight */
+  .glass {
+    background: rgba(28, 25, 37, 0.55);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 30px -12px rgba(0,0,0,.6);
+  }
+  .glass-strong {
+    background: rgba(20, 18, 28, 0.72);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
   .eyebrow {
     @apply text-[11px] font-bold uppercase tracking-[0.18em] text-muted;
   }

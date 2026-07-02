@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     const r = await fetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.9, maxOutputTokens: 120 } }),
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.95, maxOutputTokens: 220, thinkingConfig: { thinkingBudget: 0 } } }),
     });
 
     if (r.status === 429) {

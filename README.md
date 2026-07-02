@@ -179,3 +179,24 @@ the brag still posts.
 That was the **free Gemini tier's rate limit**, not a bug and not a charge — it resets on its
 own. v2's caching + on-demand calls keep usage tiny for a small group. If you ever outgrow the
 free tier, switch one line in `api/coach.js` to a paid model.
+
+---
+
+## v3 update
+
+**One database step:** run `supabase/migration_v3.sql` in the SQL Editor (additive, safe).
+Then push the code and let Vercel redeploy.
+
+- **Installable app (PWA).** Manifest, icons, offline support. On Android: Chrome → ⋮ → Add to
+  home screen (or use pwabuilder.com to export an actual .apk). iOS: Share → Add to Home Screen.
+- **New "Grind" tab.** Private personal-goal trackers with progress bars, plus a fast set-by-set
+  workout log grouped by day. Separate from the challenge — your own training camp.
+- **Per-challenge feeds.** Wins now belong to the challenge you posted them in, so each feed is
+  exclusive. (Old wins posted before v3 won't appear in a specific feed — just repost if needed.)
+- **Fixes:** duplicate challenges in the switcher (query now filters to your own memberships);
+  the AI Coach cutting off after 1–2 words (Gemini 2.5 Flash's "thinking" was eating the token
+  budget — now disabled for these one-liners); iPhone header dropdown now a centered, tappable
+  glass pill that clears the notch (safe-area insets); Playbook filters now cascade so you never
+  hit an empty combination.
+- **Sleeker UI.** Liquid-glass surfaces (translucent, blurred) on the nav, sheets, header, and
+  stat strips.

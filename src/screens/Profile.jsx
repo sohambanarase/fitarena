@@ -25,7 +25,7 @@ export default function Profile() {
       });
   }, [profile]);
 
-  useEffect(() => { loadGroupWins([user.id], 120).then((w) => setPrs(bestPRs(w))); }, [user.id]);
+  useEffect(() => { loadGroupWins([user.id], null, 120).then((w) => setPrs(bestPRs(w))); }, [user.id]);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const toggleGoal = (g) => setForm((f) => ({ ...f, goals: f.goals.includes(g) ? f.goals.filter((x) => x !== g) : [...f.goals, g] }));

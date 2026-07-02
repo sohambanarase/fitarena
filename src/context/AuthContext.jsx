@@ -28,8 +28,9 @@ export function AuthProvider({ children }) {
 
     // 2) my challenges
     const { data: cm } = await supabase
-      .from("challenge_members").select("challenges(*)").order("joined_at", { ascending: true });
-    const list = (cm || []).map((r) => r.challenges).filter(Boolean);
+      .from("challenge_members").select("challenges(*)").eq("user_id", uid).order("joined_at", { ascending: true });
+    const seen = new Set();
+    const list = (cm || []).map((r) => r.challenges).filter((c) => c && !seen.has(c.id) && seen.add(c.id));
     setChallenges(list);
     setActiveId((cur) => (list.some((c) => c.id === cur) ? cur : list[0]?.id || null));
   }, []);

@@ -4,6 +4,7 @@ import BottomNav from "./components/BottomNav.jsx";
 import Loader from "./components/Loader.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
 import Arena from "./screens/Arena.jsx";
+import Grind from "./screens/Grind.jsx";
 import Coach from "./screens/Coach.jsx";
 import Playbook from "./screens/Playbook.jsx";
 import Profile from "./screens/Profile.jsx";
@@ -24,6 +25,7 @@ export default function App() {
     <div className="phone">
       <Routes>
         <Route path="/" element={<Arena />} />
+        <Route path="/grind" element={<Grind />} />
         <Route path="/coach" element={<Coach />} />
         <Route path="/playbook" element={<Playbook />} />
         <Route path="/profile" element={<Profile />} />

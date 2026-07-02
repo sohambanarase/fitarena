@@ -48,7 +48,7 @@ export default function Arena() {
       .in("user_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"])
       .gte("log_date", since);
 
-    const winRows = await loadGroupWins(ids);
+    const winRows = await loadGroupWins(ids, activeChallenge.id);
     const logsByUser = {}, winsByUser = {};
     (logs || []).forEach((l) => (logsByUser[l.user_id] ||= []).push(l));
     winRows.forEach((w) => (winsByUser[w.user_id] ||= []).push(w));
@@ -92,24 +92,30 @@ export default function Arena() {
 
   return (
     <div className="screen space-y-3">
-      <header className="flex items-center justify-between pt-1">
-        <button onClick={() => setSheet("switch")} className="min-w-0 text-left">
-          <p className="eyebrow flex items-center gap-1">The Arena <ChevronDown size={12} /></p>
-          <h1 className="truncate font-display text-3xl uppercase leading-none tracking-wide">{activeChallenge.name}</h1>
+      <header className="flex items-center gap-2 pt-1">
+        <span className="w-14 shrink-0 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">Arena</span>
+        <button
+          onClick={() => setSheet("switch")}
+          className="glass mx-auto flex min-w-0 max-w-[62%] items-center gap-1.5 rounded-full px-4 py-2.5 active:scale-95"
+        >
+          <span className="truncate font-bold">{activeChallenge.name}</span>
+          <ChevronDown size={16} className="shrink-0 text-gold" />
         </button>
-        <button onClick={() => setSheet("invite")} className="pill flex shrink-0 items-center gap-1"><UserPlus size={14} /> Invite</button>
+        <button onClick={() => setSheet("invite")} className="pill flex w-14 shrink-0 items-center justify-center gap-1">
+          <UserPlus size={14} />
+        </button>
       </header>
 
       <div className="flex items-stretch gap-2">
-        <div className="flex-1 rounded-2xl border border-line bg-surface px-3 py-2.5">
+        <div className="glass flex-1 rounded-2xl px-3 py-2.5">
           <p className="eyebrow">Top dog</p>
           <p className="truncate font-bold">{leader && leader.total > 0 ? names[leader.id] + " \u00b7 " + leader.total : "Up for grabs"}</p>
         </div>
-        <div className="flex-1 rounded-2xl border border-line bg-surface px-3 py-2.5">
+        <div className="glass flex-1 rounded-2xl px-3 py-2.5">
           <p className="eyebrow">You</p>
           <p className="font-bold">{me ? "#" + me.rank + " \u00b7 " + me.total : "\u2014"}</p>
         </div>
-        <div className="rounded-2xl border border-line bg-surface px-3 py-2.5 text-center">
+        <div className="glass rounded-2xl px-3 py-2.5 text-center">
           <p className="eyebrow">Crew</p>
           <p className="font-score font-bold text-gold">{crewSessions}</p>
         </div>
@@ -137,7 +143,7 @@ export default function Arena() {
       </div>
 
       {sheet === "switch" && <ChallengeSwitcher onClose={() => setSheet(null)} />}
-      {sheet === "post" && <WinComposer onClose={() => setSheet(null)} onPosted={load} />}
+      {sheet === "post" && <WinComposer challengeId={activeChallenge.id} onClose={() => setSheet(null)} onPosted={load} />}
       {sheet === "invite" && <InviteSheet challenge={activeChallenge} onClose={() => setSheet(null)} />}
     </div>
   );
