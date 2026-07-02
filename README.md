@@ -200,3 +200,28 @@ Then push the code and let Vercel redeploy.
   hit an empty combination.
 - **Sleeker UI.** Liquid-glass surfaces (translucent, blurred) on the nav, sheets, header, and
   stat strips.
+
+---
+
+## v4 update
+
+**Database step:** run `supabase/migration_v4.sql` (additive, safe). Then push the code.
+
+- **Keep-alive (no more Supabase pauses).** A GitHub Action (`.github/workflows/keepalive.yml`)
+  pings the database once a day so the project never sleeps. One-time setup: in your GitHub repo,
+  **Settings → Secrets and variables → Actions**, add `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+  Free, runs forever.
+- **Smarter goals.** "Add goal → Track a lift" lets you search an exercise (e.g. Bench Press) and
+  set a target weight. It then **auto-tracks**: log that lift in your workout and the goal fills in;
+  hit the target and it flips to "Smashed." A "Custom" tab still covers non-lift goals (e.g. lose 3kg).
+- **Redesigned workout log.** Tap **Log workout** → pick a body-part tile (Chest, Back, Shoulders,
+  Biceps, Triceps, Legs) or search any exercise → choose set count → enter each set's weight/reps
+  one at a time (each set locks as you go). Each exercise shows as a single row; tap it for the
+  full set-by-set breakdown.
+- **Date navigation.** Arrows for previous/next day, or tap the date to open a calendar and jump to
+  any day to review (or backfill) that day's workout.
+
+### Assumptions baked in (easy to change)
+- Exercise goals track your **best logged weight** and complete at the target.
+- Each set stores **weight + optional reps**.
+- Logging the same exercise twice in one day **merges** into one row.
