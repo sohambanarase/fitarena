@@ -324,3 +324,28 @@ the free web-push service. Dead subscriptions are cleaned up automatically.
 
 **iPhone caveats:** works on iOS 16.4+, home-screen install only, and delivery is reliable-enough
 for reminders but not instant/guaranteed like a native app.
+
+---
+
+## How scores are calculated
+
+Each person's leaderboard score has two parts:
+
+**1. Consistency (0–100) — the base of your rank.**
+Gym days this week ÷ your weekly goal, capped at 100. A "gym day" is any day you logged as
+**Lifted** or **Cardio** (Rest, Skip, and Missed don't count as gym days). The week runs
+Monday–Sunday. Example: goal of 4, trained 3 days → 75. Train 4+ → 100.
+
+**2. Bonus (max +15) — a light topping.**
+Wins you post this week add points: a **PR** is +3, a regular **brag** is +1. The whole bonus is
+capped at +15 — deliberately small, so nobody can brag their way past people who actually show up.
+
+**Total = Consistency + Bonus.** That total sorts the leaderboard.
+
+**Streak** is separate — it's the flair number (and a tiebreaker), not added to your total.
+It counts consecutive days of activity: **Lifted, Cardio, or Rest keep it alive; a missed day
+breaks it.** So a rest day won't cost you your streak, but skipping will.
+
+**Ties** are broken in this order: total score → raw consistency ratio → longer streak → name.
+
+Everything resets each Monday, so the race restarts weekly.
