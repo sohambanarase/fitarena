@@ -27,7 +27,7 @@ export default function Profile() {
   async function testNotif() {
     setTestBusy(true); setTestMsg(null);
     try {
-      const r = await sendTestPush();
+      const r = await sendTestPush(user.id);
       setTestMsg(r.sent > 0
         ? `Sent to ${r.sent} device${r.sent !== 1 ? "s" : ""} — check your devices.`
         : (r.note || (r.lastError ? "Send failed: " + r.lastError : "Nothing sent.")));

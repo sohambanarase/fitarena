@@ -60,11 +60,14 @@ export async function disablePush() {
 }
 
 // Owner-only: ask the server to push a test notification to your own devices.
-export async function sendTestPush() {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-  if (!token) throw new Error("You're not signed in.");
-  const res = await fetch("/api/test-push", { method: "POST", headers: { Authorization: "Bearer " + token } });
+
+// Owner-only: ask the server to push a test notification to your own devices.
+export async function sendTestPush(userId) {
+  const res = await fetch("/api/test-push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId }),
+  });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || "Test failed.");
   return j;
