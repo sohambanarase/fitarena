@@ -353,7 +353,7 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
     pickExercise(ex);
   }
 
-  const title = step === "cat" ? "What did you train?" : step === "ex" ? cat.key : ex.name;
+  const title = step === "cat" ? "What did you train?" : step === "ex" ? cat.key : step === "custom" ? "Custom exercise" : (ex?.name || "Log");
 
   return (
     <Sheet title={title} onClose={onClose}>
