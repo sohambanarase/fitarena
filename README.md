@@ -349,3 +349,22 @@ breaks it.** So a rest day won't cost you your streak, but skipping will.
 **Ties** are broken in this order: total score → raw consistency ratio → longer streak → name.
 
 Everything resets each Monday, so the race restarts weekly.
+
+---
+
+## v8 update — custom exercises, smarter Coach, in-app help
+
+**Database step:** run `supabase/migration_v8.sql` (adds the custom-exercises table). Then push.
+
+- **Win / join notifications** were already built and are **member-only** — a win, PR, join, or
+  leaderboard overtake notifies only the other people in that same challenge, never outsiders.
+  (No change needed; they start firing now that the service-role key is set.)
+- **Custom exercises.** In Log workout there's now a **＋ Custom exercise** option: type any exercise
+  we don't have, optionally tag a body part, and log it. It's saved to your own exercise list for
+  next time (searchable and under its tile) and is **private to you** — nobody else sees it.
+- **Coach is now useful, not just a roast.** "Your week" gives an informative read plus two or three
+  concrete suggestions tied to your goals and how your week is balanced. Below it, **Ask the coach**
+  lets you type short training questions and get practical, goal-aware answers. (Still not medical
+  advice.)
+- **Help in Profile.** A new "How it works" card opens a plain-language guide to what each tab does
+  and what every Arena number means (Score, Consistency, Bonus, Streak, Rank, Crew, and more).

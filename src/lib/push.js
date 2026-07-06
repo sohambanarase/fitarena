@@ -58,3 +58,14 @@ export async function disablePush() {
     await sub.unsubscribe();
   }
 }
+
+// Owner-only: ask the server to push a test notification to your own devices.
+export async function sendTestPush() {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error("You're not signed in.");
+  const res = await fetch("/api/test-push", { method: "POST", headers: { Authorization: "Bearer " + token } });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || "Test failed.");
+  return j;
+}

@@ -72,3 +72,12 @@ export async function logPlan(userId, date, items) {
     await logExercise(userId, date, it.exercise, sets);
   }
 }
+
+// ---- Custom exercises (per-user, private) ----
+export async function loadCustomExercises(userId) {
+  const { data } = await supabase.from("custom_exercises").select("*").eq("user_id", userId).order("created_at", { ascending: true });
+  return data || [];
+}
+export async function addCustomExercise(userId, name, muscle) {
+  return supabase.from("custom_exercises").insert({ user_id: userId, name: name.trim(), muscle: muscle || null }).select().single();
+}

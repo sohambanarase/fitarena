@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy, Moon, Sun, Bell } from "lucide-react";
+import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight } from "lucide-react";
+import Sheet from "../components/Sheet.jsx";
 import { currentTheme, applyTheme } from "../lib/theme.js";
-import { pushSupported, isStandalone, pushStatus, enablePush, disablePush } from "../lib/push.js";
+import { pushSupported, isStandalone, pushStatus, enablePush, disablePush, sendTestPush } from "../lib/push.js";
 
 const GOALS = ["Lose fat", "Build muscle", "Recomp", "Stay consistent", "Get stronger", "Run more"];
 
@@ -19,6 +20,20 @@ export default function Profile() {
   const [pushState, setPushState] = useState("loading");
   const [pushBusy, setPushBusy] = useState(false);
   const [pushErr, setPushErr] = useState(null);
+  const isOwner = user.email === "sohambanarase1999@gmail.com";
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
+  async function testNotif() {
+    setTestBusy(true); setTestMsg(null);
+    try {
+      const r = await sendTestPush();
+      setTestMsg(r.sent > 0
+        ? `Sent to ${r.sent} device${r.sent !== 1 ? "s" : ""} — check your devices.`
+        : (r.note || (r.lastError ? "Send failed: " + r.lastError : "Nothing sent.")));
+    } catch (e) { setTestMsg(e.message || "Test failed."); }
+    setTestBusy(false);
+  }
   const needsInstall = pushSupported() && !isStandalone();
   useEffect(() => { pushStatus().then(setPushState); }, []);
   async function enableNotifs() {
@@ -87,14 +102,26 @@ export default function Profile() {
         </div>
       </div>
 
+      <button onClick={() => setShowHelp(true)} className="card flex w-full items-center gap-3 text-left active:scale-[.99]">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface2"><HelpCircle size={18} className="text-gold" /></span>
+        <div className="flex-1"><p className="font-bold">How it works</p><p className="text-[11px] text-muted">What each tab does, and what the Arena numbers mean</p></div>
+        <ChevronRight size={18} className="text-muted" />
+      </button>
+
       <div className="card">
         <p className="eyebrow flex items-center gap-1"><Bell size={12} /> Notifications</p>
         {pushState === "unsupported" ? (
           <p className="mt-2 text-sm text-muted">This browser doesn't support push notifications.</p>
         ) : pushState === "on" ? (
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <p className="text-sm text-muted">On — daily reminder and nudges are live.</p>
-            <button onClick={disableNotifs} disabled={pushBusy} className="pill shrink-0">Turn off</button>
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-muted">On — daily reminder and nudges are live.</p>
+              <button onClick={disableNotifs} disabled={pushBusy} className="pill shrink-0">Turn off</button>
+            </div>
+            {isOwner && (
+              <button onClick={testNotif} disabled={testBusy} className="btn-primary w-full">{testBusy ? "Sending…" : "Send test notification"}</button>
+            )}
+            {isOwner && testMsg && <p className="text-[11px] text-muted">{testMsg}</p>}
           </div>
         ) : (
           <>
@@ -106,6 +133,8 @@ export default function Profile() {
         )}
         {pushErr && <p className="mt-2 text-[11px] text-ember">{pushErr}</p>}
       </div>
+
+      {showHelp && <HelpSheet onClose={() => setShowHelp(false)} />}
 
       {delta !== null && (
         <div className="card flex items-center justify-between">
@@ -167,4 +196,44 @@ export default function Profile() {
 
 function Field({ label, children }) {
   return <label className="block"><span className="eyebrow mb-1 block">{label}</span>{children}</label>;
+}
+
+
+function HelpSheet({ onClose }) {
+  const Row = ({ term, children }) => (
+    <div className="rounded-xl bg-surface2 px-3 py-2.5">
+      <p className="font-bold">{term}</p>
+      <p className="text-sm text-muted">{children}</p>
+    </div>
+  );
+  return (
+    <Sheet title="How it works" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <p className="eyebrow mb-2">The tabs</p>
+          <div className="space-y-1.5">
+            <Row term="Arena">The leaderboard, plus your daily check-in. Each day, log whether you trained.</Row>
+            <Row term="Grind">Your personal training: goals that track themselves, a set-by-set workout log, and reusable workout plans.</Row>
+            <Row term="Coach">An AI read of your week with suggestions for your goals — and you can ask it short training questions.</Row>
+            <Row term="Playbook">A searchable library of exercises with how-to steps.</Row>
+            <Row term="Profile">Your stats, goals, theme, and notifications.</Row>
+          </div>
+        </div>
+        <div>
+          <p className="eyebrow mb-2">The Arena numbers</p>
+          <div className="space-y-1.5">
+            <Row term="Score">Your weekly total = Consistency + Bonus. Higher wins.</Row>
+            <Row term="Consistency (0–100)">Gym days this week ÷ your weekly goal. Hit your goal and it maxes at 100.</Row>
+            <Row term="Bonus (up to +15)">Points from wins you post — a PR is +3, a brag is +1. Kept small on purpose, so showing up matters most.</Row>
+            <Row term="Streak (e.g. 5d)">Days in a row you've been active. Lifting, cardio, or a rest day keep it alive; a missed day breaks it.</Row>
+            <Row term="Rank (#)">Where you sit on the leaderboard this week.</Row>
+            <Row term="Crew">How many people are in the challenge. Tap it to see everyone (the creator can remove members).</Row>
+            <Row term="Top dog / You">The current leader, and your own rank and score at a glance.</Row>
+            <Row term="Days left">Days remaining in the challenge.</Row>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted">Everything resets every Monday, so each week is a fresh race.</p>
+      </div>
+    </Sheet>
+  );
 }

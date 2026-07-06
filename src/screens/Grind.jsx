@@ -5,6 +5,7 @@ import {
   loadGoals, addGoal, setGoalProgress, removeGoal, syncGoalsForExercise,
   logExercise, loadEntries, removeEntry, setsOf,
   loadPlans, savePlan, deletePlan, logPlan,
+  loadCustomExercises, addCustomExercise,
 } from "../lib/grind.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
 import Sheet from "../components/Sheet.jsx";
@@ -97,7 +98,13 @@ export default function Grind() {
     const [g, e, p] = await Promise.all([loadGoals(user.id), loadEntries(user.id), loadPlans(user.id)]);
     setGoals(g); setEntries(e); setPlans(p); setLoading(false);
   }, [user.id]);
-  useEffect(() => { load(); loadExercises().then(setExercises); }, [load]);
+  const loadEx = useCallback(async () => {
+    const [base, custom] = await Promise.all([loadExercises(), loadCustomExercises(user.id)]);
+    const mapped = custom.map((c) => ({ id: "custom-" + c.id, name: c.name, muscle: c.muscle || "", images: [], custom: true }));
+    setExercises([...mapped, ...base]);
+  }, [user.id]);
+  useEffect(() => { load(); loadEx(); }, [load, loadEx]);
+  const registerCustom = (ex) => setExercises((prev) => [ex, ...prev]);
 
   const exByName = useMemo(() => {
     const m = {}; exercises.forEach((e) => (m[e.name.toLowerCase()] = e)); return m;
@@ -208,7 +215,7 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
-      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} onClose={() => setLogging(false)} onDone={load} />}
+      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} onClose={() => setLogging(false)} onDone={load} />}
       {detail && <EntryDetail entry={detail} onClose={() => setDetail(null)} onDeleted={load} />}
       {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
       {startPlan && <StartPlanSheet userId={user.id} date={date} plan={startPlan} exByName={exByName} onClose={() => setStartPlan(null)} onDone={() => { setStartPlan(null); setTab("log"); load(); }} />}
@@ -303,8 +310,13 @@ function EditGoalSheet({ goal, onClose, onDone }) {
 }
 
 /* ---------- Log flow (category → exercise → sets → per-set) ---------- */
-function LogFlow({ userId, date, exercises, onClose, onDone }) {
+const CAT_MUSCLE = { Chest: "chest", Back: "lats", Shoulders: "shoulders", Biceps: "biceps", Triceps: "triceps", Legs: "quadriceps" };
+
+function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
   const [step, setStep] = useState("cat");
+  const [customName, setCustomName] = useState("");
+  const [customCat, setCustomCat] = useState(null);
+  const [savingCustom, setSavingCustom] = useState(false);
   const [cat, setCat] = useState(null);
   const [exQ, setExQ] = useState("");
   const [ex, setEx] = useState(null);
@@ -329,6 +341,18 @@ function LogFlow({ userId, date, exercises, onClose, onDone }) {
     setBusy(true); await logExercise(userId, date, ex.name, sets); setBusy(false);
     setStep("cat"); setCat(null); setEx(null); setCount(0); setSets([]); setCur(0); setExQ(""); onDone();
   }
+  async function saveCustom() {
+    if (!customName.trim()) return;
+    setSavingCustom(true);
+    const muscle = customCat ? CAT_MUSCLE[customCat] : null;
+    const { data } = await addCustomExercise(userId, customName, muscle);
+    setSavingCustom(false);
+    const ex = { id: "custom-" + (data?.id || Date.now()), name: (data?.name || customName.trim()), muscle: data?.muscle || muscle || "", images: [], custom: true };
+    registerCustom(ex);
+    setCustomName(""); setCustomCat(null);
+    pickExercise(ex);
+  }
+
   const title = step === "cat" ? "What did you train?" : step === "ex" ? cat.key : ex.name;
 
   return (
@@ -340,6 +364,23 @@ function LogFlow({ userId, date, exercises, onClose, onDone }) {
           <div className="grid grid-cols-2 gap-2">
             {CATS.map((c) => <button key={c.key} onClick={() => { setCat(c); setExQ(""); setStep("ex"); }} className="glass flex h-16 items-center justify-center rounded-2xl font-display text-lg uppercase tracking-wide active:scale-95">{c.key}</button>)}
           </div>
+          <button onClick={() => setStep("custom")} className="flex w-full items-center justify-center gap-1 rounded-2xl border border-dashed border-line py-3 text-sm font-semibold text-muted active:scale-95"><Plus size={15} /> Custom exercise</button>
+        </div>
+      )}
+
+      {step === "custom" && (
+        <div className="space-y-3">
+          <button onClick={() => setStep("cat")} className="pill">← Back</button>
+          <label className="block"><span className="eyebrow mb-1 block">Exercise name</span>
+            <input className="inp" placeholder="e.g. Cable Y-Raise" value={customName} onChange={(e) => setCustomName(e.target.value)} autoFocus /></label>
+          <div>
+            <span className="eyebrow mb-1 block">Body part (optional — helps it show under a tile)</span>
+            <div className="flex flex-wrap gap-2">
+              {CATS.map((c) => <button key={c.key} onClick={() => setCustomCat(customCat === c.key ? null : c.key)} className={"pill " + (customCat === c.key ? "pill-on" : "")}>{c.key}</button>)}
+            </div>
+          </div>
+          <button className="btn-primary w-full" disabled={!customName.trim() || savingCustom} onClick={saveCustom}>{savingCustom ? "Saving…" : "Add & log"}</button>
+          <p className="text-[11px] text-muted">Saved to your exercises for next time. Only you can see it.</p>
         </div>
       )}
       {step === "ex" && (

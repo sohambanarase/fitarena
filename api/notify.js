@@ -46,11 +46,12 @@ export default async function handler(req, res) {
   const nowISO = new Date().toISOString();
 
   // subscriptions
-  const { data: subsRows } = await db.from("push_subscriptions").select("user_id, endpoint, subscription");
+  const { data: subsRows, error: subsErr } = await db.from("push_subscriptions").select("user_id, endpoint, subscription");
   const subsByUser = {};
   for (const r of subsRows || []) (subsByUser[r.user_id] ||= []).push(r);
   const subscribed = new Set(Object.keys(subsByUser));
-  if (subscribed.size === 0) return res.json({ ok: true, note: "no subscribers" });
+  if (subscribed.size === 0)
+    return res.json({ ok: true, note: "no subscribers", rowsSeen: subsRows?.length ?? 0, dbError: subsErr?.message || null });
 
   // state
   const { data: stRow } = await db.from("notify_state").select("state").eq("id", 1).single();
