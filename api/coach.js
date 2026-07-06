@@ -16,26 +16,42 @@ export default async function handler(req, res) {
   const days = b.gymDaysThisWeek ?? 0;
   const bd = b.breakdown || {};
   const mood = days >= weeklyGoal ? "crushing it" : days === 0 ? "ghosting the gym" : "behind pace";
+  const question = (b.question || "").toString().slice(0, 300).trim();
 
-  const prompt = [
-    'You are "The Coach" in a fitness app where ' + (b.totalPlayers || "a few") + ' friends compete in a transformation challenge.',
-    "Voice: a witty gym buddy. Sharp and funny, a little savage when they slack, but never cruel and never about looks/weight as shame. No medical advice. Hype them hard when earned.",
-    "Write ONE punchy message, 2-3 sentences, under 55 words. One emoji max. No preamble. Talk straight to them.",
-    "",
-    "Player: " + (b.name || "Athlete"),
-    "Goals: " + ((b.goals && b.goals.length ? b.goals.join(", ") : "get fitter")),
-    "This week: " + days + "/" + weeklyGoal + " gym days (" + mood + "). Breakdown — lift:" + (bd.lift||0) + " cardio:" + (bd.cardio||0) + " rest:" + (bd.rest||0) + " missed:" + (bd.skip||0) + ". Streak: " + (b.streak ?? 0) + " days.",
+  const context = [
+    "Athlete: " + (b.name || "Athlete"),
+    "Goals: " + (b.goals && b.goals.length ? b.goals.join(", ") : "general fitness"),
+    (b.startWeight && b.currentWeight ? "Weight: " + b.startWeight + "kg → " + b.currentWeight + "kg." : ""),
+    "This week: " + days + "/" + weeklyGoal + " gym days. Breakdown — lift:" + (bd.lift||0) + " cardio:" + (bd.cardio||0) + " rest:" + (bd.rest||0) + " missed:" + (bd.skip||0) + ". Streak: " + (b.streak ?? 0) + " days.",
     (b.recentPRs && b.recentPRs.length ? "Recent PRs: " + b.recentPRs.join(", ") + "." : "No PRs logged lately."),
     "Last 14 days (newest first): " + ((b.last14 || []).join(", ") || "no logs yet") + ".",
-    "",
-    "Be specific: reference what they actually did vs skipped (e.g. lots of lifting but zero cardio, or a fat streak, or a PR). If crushing it -> a TOAST. If behind/ghosting -> a ROAST plus one concrete nudge to log a session today.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
+
+  const prompt = question
+    ? [
+        "You are a knowledgeable, encouraging fitness coach inside a friendly challenge app.",
+        "Answer the athlete's question clearly and practically, tailored to their context and goals.",
+        "Keep it to 2-4 short sentences. Be concrete and actionable. No preamble.",
+        "Do NOT give medical diagnoses; for pain or injury, suggest seeing a professional.",
+        "",
+        "CONTEXT:", context,
+        "",
+        "QUESTION: " + question,
+      ].join("\n")
+    : [
+        "You are 'The Coach' in a friendly fitness challenge app. Give the athlete a short, genuinely useful read of their week.",
+        "Tone: warm, motivating gym buddy with a little personality — encouraging, never cruel, never shaming looks or weight.",
+        "Structure: first ONE sentence summarizing how the week is going, referencing what they actually did vs skipped. Then TWO or THREE concrete suggestions tied to their goals and this week's balance (examples: add a cardio day if all lifting, chase a specific PR, protect a streak, take a rest/deload if 6+ days straight, restart today if they've been missing).",
+        "Under 90 words total. At most one emoji. No preamble, no headings — talk straight to them.",
+        "",
+        "CONTEXT:", context,
+      ].join("\n");
 
   try {
     const r = await fetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.95, maxOutputTokens: 220, thinkingConfig: { thinkingBudget: 0 } } }),
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: question ? 0.6 : 0.75, maxOutputTokens: 360, thinkingConfig: { thinkingBudget: 0 } } }),
     });
 
     if (r.status === 429) {
