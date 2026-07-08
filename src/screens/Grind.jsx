@@ -370,11 +370,11 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
       {step === "cat" && (
         <div className="space-y-3">
           <ExerciseSearch exercises={exercises} onPick={pickExercise} placeholder="Search any exercise" />
+          <button onClick={() => setStep("custom")} className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-gold/50 py-3 text-sm font-bold text-gold active:scale-95"><Plus size={16} /> Add a custom exercise</button>
           <p className="eyebrow">or pick a body part</p>
           <div className="grid grid-cols-2 gap-2">
             {CATS.map((c) => <button key={c.key} onClick={() => { setCat(c); setExQ(""); setStep("ex"); }} className="glass flex h-16 items-center justify-center rounded-2xl font-display text-lg uppercase tracking-wide active:scale-95">{c.key}</button>)}
           </div>
-          <button onClick={() => setStep("custom")} className="flex w-full items-center justify-center gap-1 rounded-2xl border border-dashed border-line py-3 text-sm font-semibold text-muted active:scale-95"><Plus size={15} /> Custom exercise</button>
         </div>
       )}
 

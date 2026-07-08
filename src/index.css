@@ -31,6 +31,8 @@
     --glass-sheen: rgba(255,255,255,.07);
     --glass-shadow: 0 8px 32px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.30);
     --glass-shadow-lift: 0 16px 48px rgba(0,0,0,.55), 0 4px 12px rgba(0,0,0,.35);
+    --nav-bg: rgba(30, 27, 40, .62);
+    --sheet-bg: rgba(23, 21, 31, .97);
     --btn-glow: 0 10px 26px -12px rgba(245,196,81,.55);
     --spring: cubic-bezier(.34,1.56,.64,1);
     --ease: cubic-bezier(.4,0,.2,1);
@@ -62,6 +64,8 @@
     --glass-sheen: rgba(255,255,255,.55);
     --glass-shadow: 0 8px 32px rgba(37,33,84,.14), 0 2px 8px rgba(37,33,84,.08);
     --glass-shadow-lift: 0 16px 48px rgba(37,33,84,.20), 0 4px 12px rgba(37,33,84,.10);
+    --nav-bg: rgba(255,255,255,.66);
+    --sheet-bg: rgba(252,252,255,.98);
     --btn-glow: 0 12px 28px -12px rgba(99,91,255,.55);
   }
 
@@ -163,6 +167,26 @@
   }
   .inp:focus { border-color: rgb(var(--c-gold) / .55); box-shadow: 0 0 0 3px rgb(var(--c-gold) / .15); }
   .inp::placeholder { color: rgb(var(--c-muted)); }
+
+  /* floating island nav — lower opacity than glass-strong, still frosted */
+  .nav-island {
+    position: relative;
+    background-color: var(--nav-bg);
+    background-image: linear-gradient(140deg, var(--glass-sheen) 0%, transparent 52%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-inset), var(--glass-shadow);
+  }
+
+  /* bottom-sheet surface — nearly opaque so page content never bleeds through */
+  .sheet-pane {
+    background-color: var(--sheet-bg);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+    border-top: 1px solid var(--glass-border);
+    box-shadow: 0 -20px 60px rgba(0,0,0,.5), inset 0 1px 0 var(--glass-inset);
+  }
 
   /* glass search bar */
   .search-glass {

@@ -17,7 +17,7 @@ export default function BottomNav() {
 
   return (
     <nav
-      className="glass-strong grain fixed left-1/2 z-50 -translate-x-1/2 rounded-full px-1.5 py-1.5"
+      className="nav-island grain fixed left-1/2 z-50 -translate-x-1/2 rounded-full px-1.5 py-1.5"
       style={{ bottom: "max(0.9rem, env(safe-area-inset-bottom))", width: "min(92%, 400px)" }}
       aria-label="Main navigation"
     >

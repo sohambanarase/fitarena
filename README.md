@@ -390,3 +390,15 @@ subtle grain texture, applied selectively: glass for floating chrome, solid pane
   PR lifts, kg change), and a 14-day activity dot strip.
 - **Motion** — check-in success stamp ("LOGGED"), screen entrance transitions, spring press
   feedback on buttons/pills, sheet drag-handle and blurred scrim. `prefers-reduced-motion` respected.
+
+---
+
+## v9.1 fixes
+
+- **Custom exercise button** moved to the top of Log workout (right under the search), so it's
+  visible immediately without scrolling past the body-part tiles.
+- **Resizable sheets** — every bottom sheet (Add goal, Log workout, Crew, Challenges, etc.) can now
+  be dragged by its handle to any height you like (grab and pull up/down), or dragged down to close.
+- **Opaque sheets** — sheet surfaces are now nearly solid with a stronger blurred scrim, so page
+  content (like the wins feed) no longer shows through or under an open sheet.
+- **Navbar** background opacity reduced ~15% for a lighter, more floating feel.
