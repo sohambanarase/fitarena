@@ -9,7 +9,10 @@ import {
 } from "../lib/grind.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
 import Sheet from "../components/Sheet.jsx";
+import CountUp from "../components/CountUp.jsx";
+import ScreenHeader from "../components/ScreenHeader.jsx";
 import Loader from "../components/Loader.jsx";
+import { Timer, Copy as CopyIcon } from "lucide-react";
 import { Plus, Target, Trash2, Check, ChevronLeft, ChevronRight, Search, X, Lock, Dumbbell, Copy, Play, Pencil, Layers } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
@@ -116,15 +119,13 @@ export default function Grind() {
   const today = toISO(new Date());
 
   return (
-    <div className="screen space-y-4">
-      <header className="pt-1">
-        <p className="eyebrow text-gold">Your training camp</p>
-        <h1 className="font-display text-3xl uppercase leading-none tracking-wide">The Grind</h1>
-      </header>
+    <div className="screen animate-screen space-y-4">
+      <ScreenHeader eyebrow="Your training camp" title="The Grind" />
 
       <div className="flex gap-2">
-        <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Active goals</p><p className="font-score text-xl font-bold text-gold">{goals.length}</p></div>
-        <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Sets this week</p><p className="font-score text-xl font-bold text-gold">{setsThisWeek}</p></div>
+        <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Active goals</p><p className="font-score text-xl font-bold text-gold"><CountUp value={goals.length} duration={500} /></p></div>
+        <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Sets this week</p><p className="font-score text-xl font-bold text-gold"><CountUp value={setsThisWeek} /></p></div>
+        <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
 
       {/* Log / Planner switch */}
@@ -169,7 +170,7 @@ export default function Grind() {
                   const sets = setsOf(e);
                   const top = sets.reduce((m, s) => Math.max(m, s.weight || 0), 0);
                   return (
-                    <button key={e.id} onClick={() => setDetail(e)} className="card flex w-full items-center gap-3 text-left active:scale-[.99]">
+                    <button key={e.id} onClick={() => setDetail(e)} className="panel flex w-full items-center gap-3 p-3 text-left transition active:scale-[.99]">
                       <Thumb ex={exByName[e.exercise.toLowerCase()] || { name: e.exercise }} size={40} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-bold capitalize">{e.exercise}</p>
@@ -326,6 +327,14 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
   const [w, setW] = useState("");
   const [r, setR] = useState("");
   const [busy, setBusy] = useState(false);
+  const [restSince, setRestSince] = useState(null);   // rest timer start (ms)
+  const [restNow, setRestNow] = useState(0);
+  useEffect(() => {
+    if (!restSince) return;
+    const t = setInterval(() => setRestNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [restSince]);
+  const restSecs = restSince ? Math.floor((restNow - restSince) / 1000) : 0;
 
   const catExercises = useMemo(() => {
     if (!cat) return [];
@@ -336,9 +345,10 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
 
   function pickExercise(e) { setEx(e); setStep("count"); }
   function pickCount(n) { setCount(n); setSets([]); setCur(0); setW(""); setR(""); setStep("entry"); }
-  function saveSet() { setSets([...sets, { weight: num(w) || 0, reps: num(r) }]); setCur(cur + 1); setW(""); setR(""); }
+  function saveSet() { setSets([...sets, { weight: num(w) || 0, reps: num(r) }]); setCur(cur + 1); setW(""); setR(""); setRestSince(Date.now()); setRestNow(Date.now()); }
+  function sameAsLast() { const last = sets[sets.length - 1]; if (last) { setW(last.weight ? String(last.weight) : ""); setR(last.reps ? String(last.reps) : ""); } }
   async function finish() {
-    setBusy(true); await logExercise(userId, date, ex.name, sets); setBusy(false);
+    setBusy(true); await logExercise(userId, date, ex.name, sets); setBusy(false); setRestSince(null);
     setStep("cat"); setCat(null); setEx(null); setCount(0); setSets([]); setCur(0); setExQ(""); onDone();
   }
   async function saveCustom() {
@@ -404,6 +414,12 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
       )}
       {step === "entry" && (
         <div className="space-y-2">
+          {restSince && cur < count && (
+            <div className="glass sticky top-0 z-10 flex items-center justify-between rounded-full px-4 py-2">
+              <span className="flex items-center gap-2 text-sm font-bold text-gold"><Timer size={15} className="animate-pulse-soft" /> Rest {String(Math.floor(restSecs / 60)).padStart(1, "0")}:{String(restSecs % 60).padStart(2, "0")}</span>
+              <button onClick={() => setRestSince(null)} className="text-[11px] font-semibold text-muted">dismiss</button>
+            </div>
+          )}
           {Array.from({ length: count }).map((_, i) => {
             if (i < cur) { const s = sets[i]; return (
               <div key={i} className="flex items-center justify-between rounded-xl border border-line bg-surface2 px-4 py-3 text-sm">
@@ -412,17 +428,24 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
               </div>); }
             if (i === cur) return (
               <div key={i} className="rounded-xl border-2 border-gold bg-surface px-4 py-3">
-                <p className="mb-2 font-bold text-gold">Set {i + 1}</p>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="font-bold text-gold">Set {i + 1}</p>
+                  {sets.length > 0 && <button onClick={sameAsLast} className="pill flex items-center gap-1"><CopyIcon size={12} /> same as last</button>}
+                </div>
                 <div className="flex items-center gap-2">
-                  <input className="inp text-center" inputMode="decimal" placeholder="kg" value={w} onChange={(e) => setW(e.target.value)} autoFocus />
+                  <input className="inp py-4 text-center text-lg font-bold" inputMode="decimal" placeholder="kg" value={w} onChange={(e) => setW(e.target.value)} autoFocus />
                   <span className="text-muted">×</span>
-                  <input className="inp text-center" inputMode="numeric" placeholder="reps" value={r} onChange={(e) => setR(e.target.value)} />
-                  <button className="btn-primary shrink-0 px-4" onClick={saveSet} disabled={!w && !r}>{i + 1 === count ? "Save" : "Next"}</button>
+                  <input className="inp py-4 text-center text-lg font-bold" inputMode="numeric" placeholder="reps" value={r} onChange={(e) => setR(e.target.value)} />
+                  <button className="btn-primary shrink-0 px-5 py-4" onClick={saveSet} disabled={!w && !r}>{i + 1 === count ? "Save" : "Next"}</button>
                 </div>
               </div>);
             return <div key={i} className="rounded-xl border border-line px-4 py-3 text-sm text-muted">Set {i + 1}</div>;
           })}
-          {cur >= count && <button className="btn-primary mt-2 w-full" onClick={finish} disabled={busy}>{busy ? "Saving…" : "Finish " + ex.name}</button>}
+          {cur >= count && (
+            <div className="sticky bottom-0 z-10 -mx-1 bg-gradient-to-t from-black/20 to-transparent px-1 pb-1 pt-3">
+              <button className="btn-primary w-full animate-pop py-4 text-base" onClick={finish} disabled={busy}>{busy ? "Saving…" : "Finish " + ex.name + " ✓"}</button>
+            </div>
+          )}
         </div>
       )}
     </Sheet>

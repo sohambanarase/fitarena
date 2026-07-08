@@ -4,6 +4,9 @@ import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
 import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight } from "lucide-react";
 import Sheet from "../components/Sheet.jsx";
+import CountUp from "../components/CountUp.jsx";
+import { currentStreak, consistencyScore, toISO } from "../lib/streak.js";
+import { Flame } from "lucide-react";
 import { currentTheme, applyTheme } from "../lib/theme.js";
 import { pushSupported, isStandalone, pushStatus, enablePush, disablePush, sendTestPush } from "../lib/push.js";
 
@@ -13,6 +16,7 @@ export default function Profile() {
   const { user, profile, activeChallenge, refresh, signOut } = useAuth();
   const [form, setForm] = useState({ name: "", height_cm: "", start_weight_kg: "", current_weight_kg: "", weekly_goal: 4, goals: [] });
   const [prs, setPrs] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState(currentTheme());
@@ -35,6 +39,13 @@ export default function Profile() {
     setTestBusy(false);
   }
   const needsInstall = pushSupported() && !isStandalone();
+  useEffect(() => {
+    const since = toISO(new Date(Date.now() - 30 * 86400000));
+    supabase.from("daily_logs").select("log_date, workout_type").eq("user_id", user.id)
+      .gte("log_date", since).order("log_date", { ascending: false })
+      .then(({ data }) => setLogs(data || []));
+  }, [user.id]);
+
   useEffect(() => { pushStatus().then(setPushState); }, []);
   async function enableNotifs() {
     setPushBusy(true); setPushErr(null);
@@ -84,11 +95,39 @@ export default function Profile() {
     ? (Number(form.current_weight_kg) - Number(form.start_weight_kg)).toFixed(1) : null;
 
   return (
-    <div className="screen space-y-4">
-      <header className="pt-1">
-        <p className="eyebrow">{user.email}</p>
-        <h1 className="font-display text-3xl uppercase leading-none tracking-wide">Profile</h1>
-      </header>
+    <div className="screen animate-screen space-y-4">
+      <div className="card grain overflow-hidden">
+        <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full opacity-25" style={{ background: "var(--grad-gold)", filter: "blur(30px)" }} />
+        <div className="flex items-center gap-4">
+          <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full p-[3px]" style={{ background: "var(--grad-gold)" }}>
+            <div className="grid h-full w-full place-items-center rounded-full bg-ink font-display text-2xl text-gold">
+              {(form.name || "A")[0].toUpperCase()}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <h1 className="truncate font-display text-2xl uppercase leading-none tracking-wide">{form.name || "Athlete"}</h1>
+            <p className="truncate text-[11px] text-muted">{user.email}</p>
+            <p className="mt-1 flex items-center gap-1 text-sm font-bold text-ember"><Flame size={14} /> <CountUp value={currentStreak(logs)} duration={600} /> day streak</p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl bg-surface2/70 px-2 py-2.5"><p className="font-score text-xl font-bold text-gold"><CountUp value={consistencyScore(logs, form.weekly_goal || 4).days} duration={600} /></p><p className="eyebrow mt-0.5 !text-[9px]">Gym days wk</p></div>
+          <div className="rounded-xl bg-surface2/70 px-2 py-2.5"><p className="font-score text-xl font-bold text-mint"><CountUp value={prs.length} duration={700} /></p><p className="eyebrow mt-0.5 !text-[9px]">PR lifts</p></div>
+          <div className="rounded-xl bg-surface2/70 px-2 py-2.5"><p className="font-score text-xl font-bold text-gold"><CountUp value={delta !== null ? Math.abs(delta) : 0} decimals={1} duration={800} /></p><p className="eyebrow mt-0.5 !text-[9px]">kg {delta !== null && delta > 0 ? "gained" : "lost"}</p></div>
+        </div>
+        <div className="mt-3">
+          <p className="eyebrow mb-1.5">Last 14 days</p>
+          <div className="flex gap-1">
+            {Array.from({ length: 14 }).map((_, i) => {
+              const day = toISO(new Date(Date.now() - (13 - i) * 86400000));
+              const l = logs.find((x) => x.log_date === day);
+              const active = l && (l.workout_type === "lift" || l.workout_type === "cardio");
+              const rest = l && l.workout_type === "rest";
+              return <div key={i} className={"h-2.5 flex-1 rounded-full " + (active ? "bg-gold" : rest ? "bg-mint opacity-60" : "bg-surface2")} title={day} />;
+            })}
+          </div>
+        </div>
+      </div>
 
       <div className="card">
         <p className="eyebrow">Appearance</p>

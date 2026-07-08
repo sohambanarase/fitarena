@@ -368,3 +368,25 @@ Everything resets each Monday, so the race restarts weekly.
   advice.)
 - **Help in Profile.** A new "How it works" card opens a plain-language guide to what each tab does
   and what every Arena number means (Score, Consistency, Bonus, Streak, Rank, Crew, and more).
+
+---
+
+## v9 update — Liquid Glass redesign
+
+**No database step** — frontend only. Just push the code.
+
+Built with a three-layer glass system (specular highlight, blurred body, depth shadow) plus a
+subtle grain texture, applied selectively: glass for floating chrome, solid panels for data.
+
+- **Floating island nav** — the bottom bar is now a detached glass capsule hovering above the
+  page, with a liquid gold/indigo indicator that springs between tabs. Safe-area aware.
+- **Premium headers** — big titles get subtle parallax and fade as you scroll, while a condensed
+  floating glass title pill materializes at the top.
+- **Grind focus mode** — a floating **rest timer** starts automatically when you save a set;
+  bigger tap-friendly set inputs; a **"same as last"** one-tap fill; a sticky animated Finish
+  button; third stat tile; and count-up numbers. Log rows moved to solid panels for readability.
+- **Search & filters** — glass search bars with focus rings (Playbook's is sticky while you scroll).
+- **Profile hero** — gradient-ring avatar, live streak flame, count-up stat tiles (gym days,
+  PR lifts, kg change), and a 14-day activity dot strip.
+- **Motion** — check-in success stamp ("LOGGED"), screen entrance transitions, spring press
+  feedback on buttons/pills, sheet drag-handle and blurred scrim. `prefers-reduced-motion` respected.

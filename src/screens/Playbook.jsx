@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { loadExercises, imageUrl, imageFallback, facets, filterExercises } from "../lib/exercises.js";
 import Loader from "../components/Loader.jsx";
 import { Search, X } from "lucide-react";
+import ScreenHeader from "../components/ScreenHeader.jsx";
 
 export default function Playbook() {
   const [all, setAll] = useState(null);
@@ -34,13 +35,10 @@ export default function Playbook() {
   if (!all) return <div className="screen"><Loader label="Opening the playbook…" /></div>;
 
   return (
-    <div className="screen space-y-3">
-      <header className="pt-1">
-        <p className="eyebrow">{all.length} moves</p>
-        <h1 className="font-display text-3xl uppercase leading-none tracking-wide">The Playbook</h1>
-      </header>
+    <div className="screen animate-screen space-y-3">
+      <ScreenHeader eyebrow={all.length + " moves"} title="The Playbook" />
 
-      <div className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5">
+      <div className="search-glass sticky top-1 z-30">
         <Search size={18} className="text-muted" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search exercises"
           className="w-full bg-transparent outline-none placeholder:text-muted" />

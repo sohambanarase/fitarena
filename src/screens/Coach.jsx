@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase.js";
 import { consistencyScore, currentStreak, toISO, startOfWeekISO } from "../lib/streak.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
 import Loader from "../components/Loader.jsx";
+import ScreenHeader from "../components/ScreenHeader.jsx";
 import { Sparkles, RefreshCw, Send } from "lucide-react";
 
 const cacheKey = (uid) => "fitarena.coach." + uid + "." + toISO(new Date());
@@ -102,11 +103,8 @@ export default function Coach() {
   const hasSummary = summary.message && !summary.loading;
 
   return (
-    <div className="screen space-y-4">
-      <header className="pt-1">
-        <p className="eyebrow text-gold">Powered by Gemini</p>
-        <h1 className="font-display text-3xl uppercase leading-none tracking-wide">AI Coach</h1>
-      </header>
+    <div className="screen animate-screen space-y-4">
+      <ScreenHeader eyebrow="Powered by Gemini" title="AI Coach" />
 
       {/* Weekly read + suggestions */}
       <div className="card">

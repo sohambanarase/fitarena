@@ -11,6 +11,7 @@ import WinComposer from "../components/WinComposer.jsx";
 import ChallengeSwitcher from "../components/ChallengeSwitcher.jsx";
 import Sheet from "../components/Sheet.jsx";
 import Loader from "../components/Loader.jsx";
+import CountUp from "../components/CountUp.jsx";
 import { ChevronDown, UserPlus, Share2, Plus, Trophy, UserMinus, Crown } from "lucide-react";
 
 export default function Arena() {
@@ -19,6 +20,7 @@ export default function Arena() {
   const [wins, setWins] = useState([]);
   const [names, setNames] = useState({});
   const [savedType, setSavedType] = useState(null);
+  const [celebrate, setCelebrate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState(null);
@@ -69,7 +71,7 @@ export default function Arena() {
       .from("daily_logs")
       .upsert({ user_id: user.id, log_date: toISO(new Date()), workout_type: type }, { onConflict: "user_id,log_date" });
     if (error) setErr(error.message);
-    else setSavedType(type);
+    else { setSavedType(type); if (type === "lift" || type === "cardio") { setCelebrate(true); setTimeout(() => setCelebrate(false), 1400); } }
     await load();
     setSaving(false);
   }
@@ -91,7 +93,7 @@ export default function Arena() {
   const crewSessions = board.reduce((s, r) => s + r.days, 0);
 
   return (
-    <div className="screen space-y-3">
+    <div className="screen animate-screen space-y-3">
       <header className="flex items-center gap-2 pt-1">
         <span className="w-14 shrink-0 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">Arena</span>
         <button
@@ -117,7 +119,7 @@ export default function Arena() {
         </div>
         <button onClick={() => setSheet("members")} className="glass rounded-2xl px-3 py-2.5 text-center active:scale-95">
           <p className="eyebrow">Crew</p>
-          <p className="font-score font-bold text-gold">{board.length}</p>
+          <p className="font-score font-bold text-gold"><CountUp value={board.length} duration={500} /></p>
         </button>
       </div>
 
@@ -144,6 +146,14 @@ export default function Arena() {
 
       {sheet === "switch" && <ChallengeSwitcher onClose={() => setSheet(null)} />}
       {sheet === "post" && <WinComposer challengeId={activeChallenge.id} onClose={() => setSheet(null)} onPosted={load} />}
+      {celebrate && (
+        <div className="pointer-events-none fixed inset-0 z-[70] grid place-items-center">
+          <div className="animate-stamp rounded-3xl border-4 border-gold bg-ink/85 px-8 py-5 text-center shadow-2xl" style={{ backdropFilter: "blur(8px)" }}>
+            <p className="font-display text-4xl uppercase tracking-wider text-gold">Logged</p>
+            <p className="mt-1 text-sm text-mint">Rank points earned 💪</p>
+          </div>
+        </div>
+      )}
       {sheet === "invite" && <InviteSheet challenge={activeChallenge} onClose={() => setSheet(null)} />}
       {sheet === "members" && <MembersSheet challenge={activeChallenge} board={board} meId={user.id} sessions={crewSessions} onClose={() => setSheet(null)} onChanged={load} />}
     </div>
