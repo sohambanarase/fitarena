@@ -402,3 +402,18 @@ subtle grain texture, applied selectively: glass for floating chrome, solid pane
 - **Opaque sheets** — sheet surfaces are now nearly solid with a stronger blurred scrim, so page
   content (like the wins feed) no longer shows through or under an open sheet.
 - **Navbar** background opacity reduced ~15% for a lighter, more floating feel.
+
+---
+
+## v9.2 — scroll fixes + admin controls
+
+**Database step:** run `supabase/migration_v9.sql` (adds delete-challenge and delete-post functions).
+
+- **Sheets no longer scroll-through.** Every sheet/popup now renders in a portal pinned to the
+  viewport and locks the page behind it, so scrolling stays inside the sheet and the layer below
+  never peeks through. Fixes the Playbook exercise popup that could open off-screen.
+- **Delete a challenge (creator only).** In the Crew sheet, the creator gets a "Delete this
+  challenge" button with a confirm step. Removes the challenge, its leaderboard, and its wins feed
+  for everyone; personal workout logs are kept. Enforced server-side.
+- **Moderate the wins feed.** A trash icon appears on a post if you posted it *or* you created the
+  challenge, so admins can remove inappropriate content. Also enforced server-side.

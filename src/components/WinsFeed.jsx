@@ -1,4 +1,4 @@
-import { Trophy, Dumbbell } from "lucide-react";
+import { Trophy, Dumbbell, Trash2 } from "lucide-react";
 
 function timeAgo(iso) {
   const s = Math.floor((Date.now() - new Date(iso)) / 1000);
@@ -8,7 +8,7 @@ function timeAgo(iso) {
 }
 
 // Group feed of brags + PRs — the "people are here" social layer.
-export default function WinsFeed({ wins, nameOf }) {
+export default function WinsFeed({ wins, nameOf, canDelete, onDelete }) {
   if (!wins.length)
     return <p className="text-sm text-muted">No wins yet. Be the first to post one. 🏆</p>;
 
@@ -22,6 +22,9 @@ export default function WinsFeed({ wins, nameOf }) {
             </span>
             <p className="text-sm font-bold">{nameOf(w.user_id)}</p>
             <span className="ml-auto text-[11px] text-muted">{timeAgo(w.created_at)}</span>
+            {canDelete?.(w) && (
+              <button onClick={() => onDelete(w)} aria-label="Delete post" className="ml-1 text-muted transition active:scale-90 hover:text-ember"><Trash2 size={14} /></button>
+            )}
           </div>
 
           {w.kind === "pr" ? (

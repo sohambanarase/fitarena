@@ -12,10 +12,10 @@ import ChallengeSwitcher from "../components/ChallengeSwitcher.jsx";
 import Sheet from "../components/Sheet.jsx";
 import Loader from "../components/Loader.jsx";
 import CountUp from "../components/CountUp.jsx";
-import { ChevronDown, UserPlus, Share2, Plus, Trophy, UserMinus, Crown } from "lucide-react";
+import { ChevronDown, UserPlus, Share2, Plus, Trophy, UserMinus, Crown, Trash2 } from "lucide-react";
 
 export default function Arena() {
-  const { user, activeChallenge } = useAuth();
+  const { user, activeChallenge , refresh } = useAuth();
   const [board, setBoard] = useState([]);
   const [wins, setWins] = useState([]);
   const [names, setNames] = useState({});
@@ -92,6 +92,12 @@ export default function Arena() {
   const leader = board[0];
   const crewSessions = board.reduce((s, r) => s + r.days, 0);
 
+  async function deleteWin(w) {
+    await supabase.rpc("delete_win", { win_id: w.id });
+    load();
+  }
+  const isCreator = activeChallenge?.created_by === user.id;
+
   return (
     <div className="screen animate-screen space-y-3">
       <header className="flex items-center gap-2 pt-1">
@@ -141,7 +147,7 @@ export default function Arena() {
           <p className="eyebrow flex items-center gap-1"><Trophy size={12} /> Wins feed</p>
           <button onClick={() => setSheet("post")} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Post a win</button>
         </div>
-        {!loading && <WinsFeed wins={wins} nameOf={(id) => names[id] || "Athlete"} />}
+        {!loading && <WinsFeed wins={wins} nameOf={(id) => names[id] || "Athlete"} canDelete={(w) => w.user_id === user.id || isCreator} onDelete={deleteWin} />}
       </div>
 
       {sheet === "switch" && <ChallengeSwitcher onClose={() => setSheet(null)} />}
@@ -155,15 +161,17 @@ export default function Arena() {
         </div>
       )}
       {sheet === "invite" && <InviteSheet challenge={activeChallenge} onClose={() => setSheet(null)} />}
-      {sheet === "members" && <MembersSheet challenge={activeChallenge} board={board} meId={user.id} sessions={crewSessions} onClose={() => setSheet(null)} onChanged={load} />}
+      {sheet === "members" && <MembersSheet challenge={activeChallenge} board={board} meId={user.id} sessions={crewSessions} onClose={() => setSheet(null)} onChanged={load} onDeleteChallenge={async () => { await supabase.rpc("delete_challenge", { c_id: activeChallenge.id }); setSheet(null); refresh(); }} />}
     </div>
   );
 }
 
-function MembersSheet({ challenge, board, meId, sessions, onClose, onChanged }) {
+function MembersSheet({ challenge, board, meId, sessions, onClose, onChanged, onDeleteChallenge }) {
   const isAdmin = challenge.created_by === meId;
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
   async function remove(id) {
     setBusy(id); setErr(null);
     const { error } = await supabase.rpc("remove_member", { c_id: challenge.id, target: id });
@@ -194,6 +202,25 @@ function MembersSheet({ challenge, board, meId, sessions, onClose, onChanged }) 
       </div>
       {err && <p className="mt-2 text-sm text-ember">{err}</p>}
       {!isAdmin && <p className="mt-3 text-[11px] text-muted">Only the challenge creator can remove members.</p>}
+
+      {isAdmin && (
+        <div className="mt-6 border-t border-line pt-4">
+          {!confirmDel ? (
+            <button onClick={() => setConfirmDel(true)} className="flex w-full items-center justify-center gap-2 rounded-xl border border-ember/50 py-3 font-bold text-ember active:scale-[.98]">
+              <Trash2 size={16} /> Delete this challenge
+            </button>
+          ) : (
+            <div className="rounded-xl border border-ember/50 bg-ember/10 p-3">
+              <p className="text-sm font-bold">Delete "{challenge.name}"?</p>
+              <p className="mt-1 text-[11px] text-muted">This removes the challenge, its leaderboard, and its wins feed for everyone. Personal workout logs are kept. This can't be undone.</p>
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => setConfirmDel(false)} className="pill flex-1 py-2.5">Cancel</button>
+                <button onClick={async () => { setDelBusy(true); await onDeleteChallenge(); }} disabled={delBusy} className="flex-1 rounded-full bg-ember py-2.5 text-sm font-bold text-ink active:scale-95 disabled:opacity-50">{delBusy ? "Deleting…" : "Yes, delete"}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </Sheet>
   );
 }

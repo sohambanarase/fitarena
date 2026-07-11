@@ -3,6 +3,7 @@ import { loadExercises, imageUrl, imageFallback, facets, filterExercises } from 
 import Loader from "../components/Loader.jsx";
 import { Search, X } from "lucide-react";
 import ScreenHeader from "../components/ScreenHeader.jsx";
+import Sheet from "../components/Sheet.jsx";
 
 export default function Playbook() {
   const [all, setAll] = useState(null);
@@ -101,14 +102,8 @@ function Card({ ex, onClick }) {
 
 function Detail({ ex, onClose }) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60" onClick={onClose}>
-      <div className="max-h-[88%] w-full max-w-[440px] overflow-y-auto rounded-t-3xl border-t border-line bg-surface p-5 pb-10 animate-rise" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <h2 className="font-display text-2xl uppercase leading-tight tracking-wide">{ex.name}</h2>
-          <button onClick={onClose} className="text-muted"><X size={22} /></button>
-        </div>
-
-        <div className={"mb-3 grid gap-2 " + (ex.images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+    <Sheet title={ex.name} onClose={onClose}>
+      <div className={"mb-3 grid gap-2 " + (ex.images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
           {(ex.images.length ? ex.images : [null]).map((p, i) => (
             <ExImg key={i} path={p} name={ex.name} className="aspect-square h-auto w-full rounded-2xl object-cover" />
           ))}
@@ -122,10 +117,9 @@ function Detail({ ex, onClose }) {
         {ex.secondary?.length > 0 && (
           <p className="mb-3 text-sm capitalize text-muted">Also works: {ex.secondary.join(", ")}</p>
         )}
-        <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed">
-          {ex.steps.map((s, i) => <li key={i}>{s}</li>)}
-        </ol>
-      </div>
-    </div>
+      <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed">
+        {ex.steps.map((s, i) => <li key={i}>{s}</li>)}
+      </ol>
+    </Sheet>
   );
 }
