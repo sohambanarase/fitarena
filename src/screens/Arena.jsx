@@ -227,19 +227,23 @@ function MembersSheet({ challenge, board, meId, sessions, onClose, onChanged, on
 
 function InviteSheet({ challenge, onClose }) {
   const [copied, setCopied] = useState(false);
+  const appUrl = typeof window !== "undefined" ? window.location.origin : "";
   const share = async () => {
-    const text = 'Join my FitArena challenge "' + challenge.name + '". Code: ' + challenge.invite_code;
-    if (navigator.share) { try { await navigator.share({ text }); } catch (e) {} }
-    else { await navigator.clipboard.writeText(challenge.invite_code); setCopied(true); }
+    const text = 'Join my FitArena challenge "' + challenge.name + '" 💪\n\nCode: ' + challenge.invite_code + '\nOpen FitArena: ' + appUrl + '\n\nSign up, then tap "Join with a code".';
+    if (navigator.share) { try { await navigator.share({ title: "FitArena", text }); } catch (e) {} }
+    else { await navigator.clipboard.writeText(text); setCopied(true); }
   };
   return (
     <Sheet title="Add a friend" onClose={onClose}>
-      <p className="text-sm text-muted">Send this code. They tap "Join with a code" after signing up.</p>
+      <p className="text-sm text-muted">Send this code and the app link. They tap "Join with a code" after signing up.</p>
       <div className="mt-3 rounded-xl border border-line bg-surface2 px-4 py-5 text-center">
         <p className="font-score text-4xl font-bold tracking-[0.3em] text-gold">{challenge.invite_code}</p>
       </div>
+      <a href={appUrl} target="_blank" rel="noreferrer" className="mt-2 block truncate text-center text-sm font-bold text-gold underline">
+        {appUrl.replace(/^https?:\/\//, "") || "FitArena"}
+      </a>
       <button className="btn-primary mt-3 flex w-full items-center justify-center gap-2" onClick={share}>
-        <Share2 size={16} /> {copied ? "Copied!" : "Share invite"}
+        <Share2 size={16} /> {copied ? "Copied code + link!" : "Share invite"}
       </button>
     </Sheet>
   );

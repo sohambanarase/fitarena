@@ -5,7 +5,7 @@ import {
   loadGoals, addGoal, setGoalProgress, removeGoal, syncGoalsForExercise,
   logExercise, loadEntries, removeEntry, setsOf,
   loadPlans, savePlan, deletePlan, logPlan,
-  loadCustomExercises, addCustomExercise,
+  loadCustomExercises, addCustomExercise, updateEntry,
 } from "../lib/grind.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
 import Sheet from "../components/Sheet.jsx";
@@ -94,7 +94,10 @@ export default function Grind() {
   const [logging, setLogging] = useState(false);
   const [detail, setDetail] = useState(null);
   const [editPlan, setEditPlan] = useState(undefined); // undefined=closed, null=new, obj=edit
-  const [startPlan, setStartPlan] = useState(null);
+  const [logQueue, setLogQueue] = useState(null);
+  const [sessionStart, setSessionStart] = useState(() => { try { const v = localStorage.getItem("fitarena.session"); return v ? Number(v) : null; } catch { return null; } });
+  const startSession = useCallback(() => { setSessionStart((cur) => { if (cur) return cur; const t = Date.now(); try { localStorage.setItem("fitarena.session", String(t)); } catch {} return t; }); }, []);
+  const stopSession = () => { try { localStorage.removeItem("fitarena.session"); } catch {} setSessionStart(null); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,6 +130,8 @@ export default function Grind() {
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Sets this week</p><p className="font-score text-xl font-bold text-gold"><CountUp value={setsThisWeek} /></p></div>
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
+
+      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} />
 
       {/* Log / Planner switch */}
       <div className="glass grid grid-cols-2 gap-1 rounded-2xl p-1">
@@ -162,7 +167,7 @@ export default function Grind() {
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="eyebrow flex items-center gap-1"><Dumbbell size={12} /> Workout</p>
-              <button onClick={() => setLogging(true)} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Log workout</button>
+              <button onClick={() => { setLogQueue(null); setLogging(true); }} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Log workout</button>
             </div>
             {dayEntries.length === 0
               ? <p className="text-sm text-muted">Nothing logged for {dayLabel(date).toLowerCase()}. Tap "Log workout".</p>
@@ -198,7 +203,7 @@ export default function Grind() {
                       <p className="truncate font-bold">{p.name}</p>
                       <p className="text-[11px] text-muted">{p.exercises.length} exercise{p.exercises.length !== 1 ? "s" : ""}</p>
                     </div>
-                    <button onClick={() => setStartPlan(p)} className="btn-primary flex items-center gap-1 px-3 py-2 text-sm"><Play size={14} /> Start</button>
+                    <button onClick={() => { setLogQueue(p.exercises); setLogging(true); }} className="btn-primary flex items-center gap-1 px-3 py-2 text-sm"><Play size={14} /> Start</button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {p.exercises.slice(0, 4).map((x, i) => <span key={i} className="rounded-md bg-surface2 px-2 py-0.5 text-[11px] capitalize text-muted">{x.exercise}</span>)}
@@ -216,10 +221,9 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
-      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} onClose={() => setLogging(false)} onDone={load} />}
-      {detail && <EntryDetail entry={detail} onClose={() => setDetail(null)} onDeleted={load} />}
-      {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
-      {startPlan && <StartPlanSheet userId={user.id} date={date} plan={startPlan} exByName={exByName} onClose={() => setStartPlan(null)} onDone={() => { setStartPlan(null); setTab("log"); load(); }} />}
+      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); }} onDone={load} />}
+      {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
+      {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} registerCustom={registerCustom} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
     </div>
   );
 }
@@ -313,28 +317,34 @@ function EditGoalSheet({ goal, onClose, onDone }) {
 /* ---------- Log flow (category → exercise → sets → per-set) ---------- */
 const CAT_MUSCLE = { Chest: "chest", Back: "lats", Shoulders: "shoulders", Biceps: "biceps", Triceps: "triceps", Legs: "quadriceps" };
 
-function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
-  const [step, setStep] = useState("cat");
-  const [customName, setCustomName] = useState("");
-  const [customCat, setCustomCat] = useState(null);
-  const [savingCustom, setSavingCustom] = useState(false);
+function fmtClock(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(sec).padStart(2, "0");
+}
+
+// Session timer bar — manual start, auto-starts on first logged set, stop when done.
+function SessionBar({ start, onStart, onStop }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
+  if (!start)
+    return <button onClick={onStart} className="glass flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]"><Timer size={15} /> Start gym session</button>;
+  const s = Math.max(0, Math.floor((now - start) / 1000));
+  return (
+    <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
+      <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
+      <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
+    </div>
+  );
+}
+
+// Shared exercise picker: search + custom + body-part tiles → category list.
+function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
+  const [mode, setMode] = useState("root"); // root | cat | custom
   const [cat, setCat] = useState(null);
   const [exQ, setExQ] = useState("");
-  const [ex, setEx] = useState(null);
-  const [count, setCount] = useState(0);
-  const [sets, setSets] = useState([]);
-  const [cur, setCur] = useState(0);
-  const [w, setW] = useState("");
-  const [r, setR] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [restSince, setRestSince] = useState(null);   // rest timer start (ms)
-  const [restNow, setRestNow] = useState(0);
-  useEffect(() => {
-    if (!restSince) return;
-    const t = setInterval(() => setRestNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [restSince]);
-  const restSecs = restSince ? Math.floor((restNow - restSince) / 1000) : 0;
+  const [customName, setCustomName] = useState("");
+  const [customCat, setCustomCat] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const catExercises = useMemo(() => {
     if (!cat) return [];
@@ -343,83 +353,140 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
     return (n ? list.filter((e) => e.name.toLowerCase().includes(n)) : list).sort((a, b) => a.name.localeCompare(b.name));
   }, [cat, exQ, exercises]);
 
-  function pickExercise(e) { setEx(e); setStep("count"); }
-  function pickCount(n) { setCount(n); setSets([]); setCur(0); setW(""); setR(""); setStep("entry"); }
-  function saveSet() { setSets([...sets, { weight: num(w) || 0, reps: num(r) }]); setCur(cur + 1); setW(""); setR(""); setRestSince(Date.now()); setRestNow(Date.now()); }
-  function sameAsLast() { const last = sets[sets.length - 1]; if (last) { setW(last.weight ? String(last.weight) : ""); setR(last.reps ? String(last.reps) : ""); } }
-  async function finish() {
-    setBusy(true); await logExercise(userId, date, ex.name, sets); setBusy(false); setRestSince(null);
-    setStep("cat"); setCat(null); setEx(null); setCount(0); setSets([]); setCur(0); setExQ(""); onDone();
-  }
   async function saveCustom() {
     if (!customName.trim()) return;
-    setSavingCustom(true);
+    setSaving(true);
     const muscle = customCat ? CAT_MUSCLE[customCat] : null;
     const { data } = await addCustomExercise(userId, customName, muscle);
-    setSavingCustom(false);
-    const ex = { id: "custom-" + (data?.id || Date.now()), name: (data?.name || customName.trim()), muscle: data?.muscle || muscle || "", images: [], custom: true };
-    registerCustom(ex);
-    setCustomName(""); setCustomCat(null);
-    pickExercise(ex);
+    setSaving(false);
+    const ex = { id: "custom-" + (data?.id || Date.now()), name: data?.name || customName.trim(), muscle: data?.muscle || muscle || "", images: [], custom: true };
+    registerCustom?.(ex); onPick(ex);
   }
 
-  const title = step === "cat" ? "What did you train?" : step === "ex" ? cat.key : step === "custom" ? "Custom exercise" : (ex?.name || "Log");
+  if (mode === "custom") return (
+    <div className="space-y-3">
+      <button onClick={() => setMode("root")} className="pill">← Back</button>
+      <label className="block"><span className="eyebrow mb-1 block">Exercise name</span>
+        <input className="inp" placeholder="e.g. Cable Y-Raise" value={customName} onChange={(e) => setCustomName(e.target.value)} autoFocus /></label>
+      <div><span className="eyebrow mb-1 block">Body part (optional)</span>
+        <div className="flex flex-wrap gap-2">
+          {CATS.map((c) => <button key={c.key} onClick={() => setCustomCat(customCat === c.key ? null : c.key)} className={"pill " + (customCat === c.key ? "pill-on" : "")}>{c.key}</button>)}
+        </div></div>
+      <button className="btn-primary w-full" disabled={!customName.trim() || saving} onClick={saveCustom}>{saving ? "Saving…" : "Add exercise"}</button>
+    </div>
+  );
+
+  if (mode === "cat") return (
+    <div className="space-y-2">
+      <button onClick={() => { setMode("root"); setExQ(""); }} className="pill">← Categories</button>
+      <SearchBox value={exQ} onChange={setExQ} placeholder={"Search in " + cat.key} autoFocus />
+      <div className="max-h-80 space-y-1 overflow-y-auto">
+        {catExercises.map((e) => <ExRow key={e.id} ex={e} onClick={() => onPick(e)} />)}
+        {catExercises.length === 0 && <p className="text-sm text-muted">No match in {cat.key}.</p>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <ExerciseSearch exercises={exercises} onPick={onPick} placeholder="Search any exercise" />
+      <button onClick={() => setMode("custom")} className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-gold/50 py-3 text-sm font-bold text-gold active:scale-95"><Plus size={16} /> Add a custom exercise</button>
+      <p className="eyebrow">or pick a body part</p>
+      <div className="grid grid-cols-2 gap-2">
+        {CATS.map((c) => <button key={c.key} onClick={() => { setCat(c); setExQ(""); setMode("cat"); }} className="glass flex h-16 items-center justify-center rounded-2xl font-display text-lg uppercase tracking-wide active:scale-95">{c.key}</button>)}
+      </div>
+    </div>
+  );
+}
+
+// Unified log engine. Normal mode: pick → sets → entry. Plan mode (queue): walks the
+// plan exercise-by-exercise, pre-filling each set with the target (editable), with rest
+// timers between sets AND between exercises. Auto-starts the session on the first set.
+function LogFlow({ userId, date, exercises, registerCustom, queue, startSession, onClose, onDone }) {
+  const isPlan = Array.isArray(queue) && queue.length > 0;
+  const exByNameLocal = useMemo(() => { const m = {}; exercises.forEach((e) => (m[e.name.toLowerCase()] = e)); return m; }, [exercises]);
+  const resolveEx = useCallback((name, i) => exByNameLocal[name.toLowerCase()] || { id: "q" + i, name, images: [], muscle: "" }, [exByNameLocal]);
+
+  const [qIdx, setQIdx] = useState(0);
+  const [step, setStep] = useState("pick");
+  const [ex, setEx] = useState(null);
+  const [count, setCount] = useState(0);
+  const [target, setTarget] = useState(null);
+  const [sets, setSets] = useState([]);
+  const [cur, setCur] = useState(0);
+  const [w, setW] = useState("");
+  const [r, setR] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [restSince, setRestSince] = useState(null);
+  const [restNow, setRestNow] = useState(0);
+  useEffect(() => { if (!restSince) return; const t = setInterval(() => setRestNow(Date.now()), 1000); return () => clearInterval(t); }, [restSince]);
+  const restSecs = restSince ? Math.floor((restNow - restSince) / 1000) : 0;
+
+  const enterEntry = useCallback((exObj, setCount, tgt) => {
+    setEx(exObj); setCount(Math.max(1, setCount || 3)); setTarget(tgt || null);
+    setSets([]); setCur(0); setRestSince(null);
+    setW(tgt && tgt.weight != null && tgt.weight !== "" ? String(tgt.weight) : "");
+    setR(tgt && tgt.reps != null && tgt.reps !== "" ? String(tgt.reps) : "");
+    setStep("entry");
+  }, []);
+
+  // plan mode: jump straight into the first exercise
+  useEffect(() => {
+    if (isPlan) { const it = queue[0]; enterEntry(resolveEx(it.exercise, 0), Number(it.sets) || 3, { weight: it.weight, reps: it.reps }); }
+    else setStep("pick");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const prefill = (tgt) => { setW(tgt && tgt.weight != null && tgt.weight !== "" ? String(tgt.weight) : ""); setR(tgt && tgt.reps != null && tgt.reps !== "" ? String(tgt.reps) : ""); };
+
+  function pickExercise(e) { setEx(e); setStep("count"); }
+  function pickCount(n) { enterEntry(ex, n, null); }
+  function saveSet() {
+    startSession && startSession();
+    setSets((prev) => [...prev, { weight: num(w) || 0, reps: num(r) }]);
+    setCur((c) => c + 1); prefill(target);
+    setRestSince(Date.now()); setRestNow(Date.now());
+  }
+  function sameAsLast() { const last = sets[sets.length - 1]; if (last) { setW(last.weight ? String(last.weight) : ""); setR(last.reps ? String(last.reps) : ""); } }
+
+  async function finish() {
+    setBusy(true); await logExercise(userId, date, ex.name, sets); setBusy(false); onDone();
+    setRestSince(Date.now()); setRestNow(Date.now());
+    if (isPlan && qIdx >= queue.length - 1) { onClose(); return; }
+    setStep("rest");
+  }
+  function startNext() {
+    const ni = qIdx + 1; setQIdx(ni); const it = queue[ni];
+    enterEntry(resolveEx(it.exercise, ni), Number(it.sets) || 3, { weight: it.weight, reps: it.reps });
+  }
+  function logAnother() { setEx(null); setCount(0); setSets([]); setCur(0); setTarget(null); setRestSince(null); setStep("pick"); }
+
+  const title = step === "pick" ? "What did you train?" : step === "rest" ? "Rest" : (ex?.name || "Log");
+  const nextName = isPlan && qIdx < queue.length - 1 ? queue[qIdx + 1].exercise : null;
 
   return (
     <Sheet title={title} onClose={onClose}>
-      {step === "cat" && (
-        <div className="space-y-3">
-          <ExerciseSearch exercises={exercises} onPick={pickExercise} placeholder="Search any exercise" />
-          <button onClick={() => setStep("custom")} className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-gold/50 py-3 text-sm font-bold text-gold active:scale-95"><Plus size={16} /> Add a custom exercise</button>
-          <p className="eyebrow">or pick a body part</p>
-          <div className="grid grid-cols-2 gap-2">
-            {CATS.map((c) => <button key={c.key} onClick={() => { setCat(c); setExQ(""); setStep("ex"); }} className="glass flex h-16 items-center justify-center rounded-2xl font-display text-lg uppercase tracking-wide active:scale-95">{c.key}</button>)}
-          </div>
-        </div>
-      )}
+      {step === "pick" && <ExercisePicker exercises={exercises} userId={userId} registerCustom={registerCustom} onPick={pickExercise} />}
 
-      {step === "custom" && (
-        <div className="space-y-3">
-          <button onClick={() => setStep("cat")} className="pill">← Back</button>
-          <label className="block"><span className="eyebrow mb-1 block">Exercise name</span>
-            <input className="inp" placeholder="e.g. Cable Y-Raise" value={customName} onChange={(e) => setCustomName(e.target.value)} autoFocus /></label>
-          <div>
-            <span className="eyebrow mb-1 block">Body part (optional — helps it show under a tile)</span>
-            <div className="flex flex-wrap gap-2">
-              {CATS.map((c) => <button key={c.key} onClick={() => setCustomCat(customCat === c.key ? null : c.key)} className={"pill " + (customCat === c.key ? "pill-on" : "")}>{c.key}</button>)}
-            </div>
-          </div>
-          <button className="btn-primary w-full" disabled={!customName.trim() || savingCustom} onClick={saveCustom}>{savingCustom ? "Saving…" : "Add & log"}</button>
-          <p className="text-[11px] text-muted">Saved to your exercises for next time. Only you can see it.</p>
-        </div>
-      )}
-      {step === "ex" && (
-        <div className="space-y-2">
-          <button onClick={() => setStep("cat")} className="pill">← Categories</button>
-          <SearchBox value={exQ} onChange={setExQ} placeholder={"Search in " + cat.key} autoFocus />
-          <div className="max-h-80 space-y-1 overflow-y-auto">
-            {catExercises.map((e) => <ExRow key={e.id} ex={e} onClick={() => pickExercise(e)} />)}
-            {catExercises.length === 0 && <p className="text-sm text-muted">No match in {cat.key}.</p>}
-          </div>
-        </div>
-      )}
       {step === "count" && (
         <div className="space-y-3">
-          <p className="eyebrow">How many sets?</p>
+          <p className="eyebrow">How many sets? (you can add more later)</p>
           <div className="grid grid-cols-4 gap-2">
             {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <button key={n} onClick={() => pickCount(n)} className="glass grid h-14 place-items-center rounded-xl font-score text-lg font-bold active:scale-95">{n}</button>)}
           </div>
-          <button onClick={() => setStep("ex")} className="pill">← Back</button>
+          <button onClick={() => setStep("pick")} className="pill">← Back</button>
         </div>
       )}
+
       {step === "entry" && (
         <div className="space-y-2">
           {restSince && cur < count && (
             <div className="glass sticky top-0 z-10 flex items-center justify-between rounded-full px-4 py-2">
-              <span className="flex items-center gap-2 text-sm font-bold text-gold"><Timer size={15} className="animate-pulse-soft" /> Rest {String(Math.floor(restSecs / 60)).padStart(1, "0")}:{String(restSecs % 60).padStart(2, "0")}</span>
+              <span className="flex items-center gap-2 text-sm font-bold text-gold"><Timer size={15} className="animate-pulse-soft" /> Rest {fmtClock(restSecs)}</span>
               <button onClick={() => setRestSince(null)} className="text-[11px] font-semibold text-muted">dismiss</button>
             </div>
           )}
+          {isPlan && <p className="eyebrow">Exercise {qIdx + 1} of {queue.length}{target ? " · target " + (target.weight || "?") + "kg × " + (target.reps || "?") : ""}</p>}
           {Array.from({ length: count }).map((_, i) => {
             if (i < cur) { const s = sets[i]; return (
               <div key={i} className="flex items-center justify-between rounded-xl border border-line bg-surface2 px-4 py-3 text-sm">
@@ -442,8 +509,26 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
             return <div key={i} className="rounded-xl border border-line px-4 py-3 text-sm text-muted">Set {i + 1}</div>;
           })}
           {cur >= count && (
-            <div className="sticky bottom-0 z-10 -mx-1 bg-gradient-to-t from-black/20 to-transparent px-1 pb-1 pt-3">
+            <div className="sticky bottom-0 z-10 -mx-1 space-y-2 bg-gradient-to-t from-black/20 to-transparent px-1 pb-1 pt-3">
+              <button onClick={() => setCount(count + 1)} className="pill flex w-full items-center justify-center gap-1 py-2.5"><Plus size={13} /> Add another set</button>
               <button className="btn-primary w-full animate-pop py-4 text-base" onClick={finish} disabled={busy}>{busy ? "Saving…" : "Finish " + ex.name + " ✓"}</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {step === "rest" && (
+        <div className="space-y-4 py-4 text-center">
+          <div className="mx-auto grid h-28 w-28 place-items-center rounded-full border-4 border-gold">
+            <span className="font-score text-3xl font-bold text-gold">{fmtClock(restSecs)}</span>
+          </div>
+          <p className="eyebrow">{nextName ? "Rest — up next: " + nextName : "Rest"}</p>
+          {nextName ? (
+            <button className="btn-primary w-full py-4 text-base" onClick={startNext}>Start next: {nextName}</button>
+          ) : (
+            <div className="space-y-2">
+              <button className="btn-primary w-full py-4 text-base" onClick={logAnother}>Log another exercise</button>
+              <button className="pill mx-auto block px-6 py-2" onClick={onClose}>Done for now</button>
             </div>
           )}
         </div>
@@ -451,31 +536,48 @@ function LogFlow({ userId, date, exercises, registerCustom, onClose, onDone }) {
     </Sheet>
   );
 }
-function EntryDetail({ entry, onClose, onDeleted }) {
-  const sets = setsOf(entry);
+
+// Tap a logged exercise → edit/add/delete sets, or delete the whole thing.
+function EntryDetail({ entry, userId, onClose, onSaved, onDeleted }) {
+  const [sets, setSets] = useState(() => setsOf(entry).map((s) => ({ weight: s.weight ?? "", reps: s.reps ?? "" })));
+  const [busy, setBusy] = useState(false);
+  const setField = (i, k, v) => setSets(sets.map((s, j) => (j === i ? { ...s, [k]: v } : s)));
+  const addSet = () => { const last = sets[sets.length - 1]; setSets([...sets, { weight: last?.weight ?? "", reps: last?.reps ?? "" }]); };
+  const delSet = (i) => setSets(sets.filter((_, j) => j !== i));
+  async function save() {
+    setBusy(true);
+    const clean = sets.map((s) => ({ weight: num(s.weight) || 0, reps: num(s.reps) }));
+    await updateEntry(entry.id, clean, userId, entry.exercise);
+    setBusy(false); onSaved(); onClose();
+  }
   return (
     <Sheet title={entry.exercise} onClose={onClose}>
-      <div className="space-y-1.5">
+      <p className="eyebrow mb-2">Edit sets</p>
+      <div className="space-y-2">
         {sets.map((s, i) => (
-          <div key={i} className="flex items-center justify-between rounded-xl bg-surface2 px-4 py-2.5">
-            <span className="font-bold">Set {i + 1}</span>
-            <span className="font-score">{s.weight ? s.weight + "kg" : "bodyweight"}{s.reps ? " × " + s.reps : ""}</span>
+          <div key={i} className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+            <span className="w-12 text-sm font-bold text-muted">Set {i + 1}</span>
+            <input className="inp flex-1 py-2.5 text-center" inputMode="decimal" placeholder="kg" value={s.weight} onChange={(e) => setField(i, "weight", e.target.value)} />
+            <span className="text-muted">×</span>
+            <input className="inp flex-1 py-2.5 text-center" inputMode="numeric" placeholder="reps" value={s.reps} onChange={(e) => setField(i, "reps", e.target.value)} />
+            <button onClick={() => delSet(i)} className="text-muted active:scale-90 hover:text-ember"><Trash2 size={16} /></button>
           </div>
         ))}
-        {sets.length === 0 && <p className="text-sm text-muted">No set detail recorded.</p>}
+        {sets.length === 0 && <p className="text-sm text-muted">No sets. Add one below.</p>}
       </div>
-      <button className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-line py-3 text-ember active:scale-[.98]" onClick={async () => { await removeEntry(entry.id); onDeleted(); onClose(); }}><Trash2 size={16} /> Delete exercise</button>
+      <button onClick={addSet} className="pill mt-2 flex w-full items-center justify-center gap-1 py-2.5"><Plus size={14} /> Add set</button>
+      <button className="btn-primary mt-3 w-full" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
+      <button className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-line py-3 text-ember active:scale-[.98]" onClick={async () => { await removeEntry(entry.id); onDeleted(); onClose(); }}><Trash2 size={16} /> Delete exercise</button>
     </Sheet>
   );
 }
 
 /* ---------- Planner ---------- */
-function PlanEditor({ userId, exercises, exByName, plan, onClose, onDone }) {
+function PlanEditor({ userId, exercises, exByName, registerCustom, plan, onClose, onDone }) {
   const [name, setName] = useState(plan?.name || "");
   const [items, setItems] = useState(plan?.exercises || []);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-
   const setItem = (i, patch) => setItems(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const removeItem = (i) => setItems(items.filter((_, j) => j !== i));
 
@@ -487,7 +589,8 @@ function PlanEditor({ userId, exercises, exByName, plan, onClose, onDone }) {
 
   if (adding) return (
     <Sheet title="Add exercise" onClose={() => setAdding(false)}>
-      <ExerciseSearch exercises={exercises} autoFocus onPick={(e) => { setItems([...items, { exercise: e.name, sets: 3, reps: 8, weight: "" }]); setAdding(false); }} />
+      <ExercisePicker exercises={exercises} userId={userId} registerCustom={registerCustom}
+        onPick={(e) => { setItems([...items, { exercise: e.name, sets: 3, reps: 8, weight: "" }]); setAdding(false); }} />
     </Sheet>
   );
 
@@ -523,30 +626,5 @@ function Mini({ label, value, onChange }) {
       <input className="w-full bg-transparent text-center outline-none" inputMode="decimal" placeholder={label} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
       <span className="text-[10px] text-muted">{label}</span>
     </label>
-  );
-}
-function StartPlanSheet({ userId, date, plan, exByName, onClose, onDone }) {
-  const [rows, setRows] = useState(plan.exercises.map((x) => ({ ...x, w: x.weight == null ? "" : String(x.weight) })));
-  const [busy, setBusy] = useState(false);
-  const setW = (i, v) => setRows(rows.map((r, j) => (j === i ? { ...r, w: v } : r)));
-  async function go() {
-    setBusy(true);
-    await logPlan(userId, date, rows.map((r) => ({ exercise: r.exercise, sets: r.sets, reps: r.reps, weight: r.w })));
-    setBusy(false); onDone();
-  }
-  return (
-    <Sheet title={plan.name} onClose={onClose}>
-      <p className="eyebrow mb-2">Tweak today's weights, then log it all</p>
-      <div className="space-y-2">
-        {rows.map((r, i) => (
-          <div key={i} className="flex items-center gap-3 rounded-xl bg-surface2 px-3 py-2">
-            <Thumb ex={exByName[r.exercise.toLowerCase()] || { name: r.exercise }} size={32} />
-            <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold capitalize">{r.exercise}</p><p className="text-[11px] text-muted">{r.sets} × {r.reps || "?"}</p></div>
-            <input className="w-16 rounded-lg bg-surface2 px-2 py-1.5 text-center outline-none text-paper" inputMode="decimal" placeholder="kg" value={r.w} onChange={(e) => setW(i, e.target.value)} />
-          </div>
-        ))}
-      </div>
-      <button className="btn-primary mt-3 w-full" onClick={go} disabled={busy}>{busy ? "Logging…" : "Log to " + dayLabel(date).toLowerCase()}</button>
-    </Sheet>
   );
 }

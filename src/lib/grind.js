@@ -81,3 +81,10 @@ export async function loadCustomExercises(userId) {
 export async function addCustomExercise(userId, name, muscle) {
   return supabase.from("custom_exercises").insert({ user_id: userId, name: name.trim(), muscle: muscle || null }).select().single();
 }
+
+// Overwrite a logged exercise's sets (edit/add/delete sets), then re-sync goals.
+export async function updateEntry(entryId, sets, userId, exercise) {
+  const top = sets.reduce((m, s) => Math.max(m, s.weight || 0), 0);
+  await supabase.from("workout_entries").update({ sets_detail: sets, sets: sets.length, weight_kg: top || null }).eq("id", entryId);
+  if (userId && exercise) await syncGoalsForExercise(userId, exercise);
+}

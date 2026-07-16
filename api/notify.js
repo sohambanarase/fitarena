@@ -160,6 +160,6 @@ export default async function handler(req, res) {
     }
   }
 
-  await db.from("notify_state").update({ state, updated_at: nowISO }).eq("id", 1);
+  await db.from("notify_state").upsert({ id: 1, state, updated_at: nowISO });
   return res.json({ ok: true, queued: queue.length, sent, pruned });
 }

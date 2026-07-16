@@ -40,24 +40,37 @@ export default function Coach() {
     const myWins = await loadGroupWins([user.id]);
     const c = consistencyScore(logs, profile?.weekly_goal ?? 4);
     const ws = startOfWeekISO();
+    const lastWeekStart = toISO(new Date(new Date(ws + "T00:00:00").getTime() - 7 * 86400000));
     const weekLogs = logs.filter((l) => l.log_date >= ws);
+    const gym = (l) => l.workout_type === "lift" || l.workout_type === "cardio";
+    const lastWeekGymDays = logs.filter((l) => l.log_date >= lastWeekStart && l.log_date < ws && gym(l)).length;
     const breakdown = {
       lift: weekLogs.filter((l) => l.workout_type === "lift").length,
       cardio: weekLogs.filter((l) => l.workout_type === "cardio").length,
       rest: weekLogs.filter((l) => l.workout_type === "rest").length,
       skip: weekLogs.filter((l) => l.workout_type === "skip").length,
     };
+    // set volume from the detailed log (this week vs last week)
+    const { data: entries = [] } = await supabase.from("workout_entries")
+      .select("log_date, sets_detail").eq("user_id", user.id).gte("log_date", lastWeekStart);
+    const setsIn = (from, to) => (entries || []).filter((e) => e.log_date >= from && (!to || e.log_date < to))
+      .reduce((n, e) => n + (e.sets_detail?.length || 0), 0);
+    const weeklyGoal = profile?.weekly_goal ?? 4;
     return {
       name: profile?.name,
       goals: profile?.goals?.length ? profile.goals : [profile?.goal].filter(Boolean),
       startWeight: profile?.start_weight_kg,
       currentWeight: profile?.current_weight_kg,
-      weeklyGoal: profile?.weekly_goal ?? 4,
+      weeklyGoal,
       gymDaysThisWeek: c.days,
+      lastWeekGymDays,
+      consistencyPct: Math.min(100, Math.round((c.days / Math.max(1, weeklyGoal)) * 100)),
+      setsThisWeek: setsIn(ws, null),
+      setsLastWeek: setsIn(lastWeekStart, ws),
       breakdown,
       streak: currentStreak(logs),
       totalPlayers: members.length || 1,
-      recentPRs: bestPRs(myWins).slice(0, 3).map((w) => w.exercise + (w.weight_kg ? " " + w.weight_kg + "kg" : "")),
+      recentPRs: bestPRs(myWins).slice(0, 4).map((w) => w.exercise + (w.weight_kg ? " " + w.weight_kg + "kg" : "") + (w.reps ? " × " + w.reps : "")),
       last14: logs.slice(0, 14).map((l) => l.workout_type),
     };
   }, [user, profile, activeChallenge]);

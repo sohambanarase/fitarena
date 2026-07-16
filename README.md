@@ -417,3 +417,24 @@ subtle grain texture, applied selectively: glass for floating chrome, solid pane
   for everyone; personal workout logs are kept. Enforced server-side.
 - **Moderate the wins feed.** A trash icon appears on a post if you posted it *or* you created the
   challenge, so admins can remove inappropriate content. Also enforced server-side.
+
+---
+
+## v10 — plan/log unification, timers, editable sets, statistical Coach
+
+**No new database migration** for this batch. Just push the code.
+
+- **Starting a plan now logs set-by-set.** Instead of dumping identical sets, "Start" walks the plan
+  exercise-by-exercise through the real set entry — each set pre-filled with the plan's target
+  weight/reps but fully editable, and you can add or remove sets as you go.
+- **Edit anything after the fact.** Tap a logged exercise to edit each set's weight/reps, delete a
+  set, or add sets — then Save. (Whole-exercise delete still there.)
+- **Three timers.** A rest timer between sets (auto), a rest timer *between exercises* (with the next
+  exercise queued), and a full **gym-session timer** you can start manually — it also auto-starts the
+  moment you log your first set, and you stop it when you're done.
+- **Add plan exercises by body part or custom.** The plan editor's "Add exercise" now has the same
+  search + body-part tiles + custom-exercise option as logging.
+- **Coach is now statistical.** The weekly read leads with real numbers and week-over-week trends
+  (consistency %, sets this week vs last, gym-day trend, PR bests) and gives numbers-based suggestions.
+- **Invites include the app link.** Sharing a code now sends the join code *and* your app link, and
+  the sheet shows a tappable link.

@@ -18,12 +18,15 @@ export default async function handler(req, res) {
   const mood = days >= weeklyGoal ? "crushing it" : days === 0 ? "ghosting the gym" : "behind pace";
   const question = (b.question || "").toString().slice(0, 300).trim();
 
+  const wchg = (b.startWeight && b.currentWeight) ? (b.currentWeight - b.startWeight) : null;
   const context = [
     "Athlete: " + (b.name || "Athlete"),
     "Goals: " + (b.goals && b.goals.length ? b.goals.join(", ") : "general fitness"),
-    (b.startWeight && b.currentWeight ? "Weight: " + b.startWeight + "kg → " + b.currentWeight + "kg." : ""),
-    "This week: " + days + "/" + weeklyGoal + " gym days. Breakdown — lift:" + (bd.lift||0) + " cardio:" + (bd.cardio||0) + " rest:" + (bd.rest||0) + " missed:" + (bd.skip||0) + ". Streak: " + (b.streak ?? 0) + " days.",
-    (b.recentPRs && b.recentPRs.length ? "Recent PRs: " + b.recentPRs.join(", ") + "." : "No PRs logged lately."),
+    (wchg != null ? "Bodyweight: " + b.startWeight + "kg -> " + b.currentWeight + "kg (" + (wchg >= 0 ? "+" : "") + wchg.toFixed(1) + "kg)." : ""),
+    "Consistency this week: " + (b.consistencyPct ?? 0) + "% (" + days + " of " + weeklyGoal + " goal gym days). Last week: " + (b.lastWeekGymDays ?? 0) + " gym days.",
+    "Sets logged: " + (b.setsThisWeek ?? 0) + " this week vs " + (b.setsLastWeek ?? 0) + " last week.",
+    "This week split - lift:" + (bd.lift||0) + " cardio:" + (bd.cardio||0) + " rest:" + (bd.rest||0) + " missed:" + (bd.skip||0) + ". Current streak: " + (b.streak ?? 0) + " days.",
+    (b.recentPRs && b.recentPRs.length ? "Best lifts: " + b.recentPRs.join(", ") + "." : "No PRs logged yet."),
     "Last 14 days (newest first): " + ((b.last14 || []).join(", ") || "no logs yet") + ".",
   ].filter(Boolean).join("\n");
 
@@ -39,10 +42,9 @@ export default async function handler(req, res) {
         "QUESTION: " + question,
       ].join("\n")
     : [
-        "You are 'The Coach' in a friendly fitness challenge app. Give the athlete a short, genuinely useful read of their week.",
-        "Tone: warm, motivating gym buddy with a little personality — encouraging, never cruel, never shaming looks or weight.",
-        "Structure: first ONE sentence summarizing how the week is going, referencing what they actually did vs skipped. Then TWO or THREE concrete suggestions tied to their goals and this week's balance (examples: add a cardio day if all lifting, chase a specific PR, protect a streak, take a rest/deload if 6+ days straight, restart today if they've been missing).",
-        "Under 90 words total. At most one emoji. No preamble, no headings — talk straight to them.",
+        "You are 'The Coach' - a sharp, data-literate fitness coach in a challenge app. Give an INSIGHTFUL, statistical read of the athlete's week; lead with the numbers and what they mean.",
+        "Structure: (1) a one-line headline with the key number(s) AND the week-over-week trend (e.g. 'Volume up 18% — 24 sets vs 20 last week' or 'Consistency slipped to 60% from 100%'). (2) one sentence interpreting the pattern (volume up but consistency down, all lifting no cardio, streak building, etc). (3) TWO specific numbers-based suggestions tied to their goals (e.g. 'one more session hits 5/5', 'you're ~5kg off your bench goal, try 3x5').",
+        "Warm and motivating, never shaming looks or weight. Under 95 words. At most one emoji. No headings, no preamble - talk straight to them.",
         "",
         "CONTEXT:", context,
       ].join("\n");
