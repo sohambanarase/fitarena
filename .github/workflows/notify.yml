@@ -1,0 +1,17 @@
+name: fitarena-notify
+   on:
+     schedule:
+       - cron: "*/30 * * * *"
+     workflow_dispatch: {}
+   jobs:
+     notify:
+       runs-on: ubuntu-latest
+       steps:
+         - name: Trigger sender
+           run: |
+             echo "Calling notify endpoint..."
+             resp=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "$NOTIFY_URL?secret=$NOTIFY_SECRET")
+             echo "Response: $resp"
+           env:
+             NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
+             NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
