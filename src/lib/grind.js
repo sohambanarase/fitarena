@@ -88,3 +88,13 @@ export async function updateEntry(entryId, sets, userId, exercise) {
   await supabase.from("workout_entries").update({ sets_detail: sets, sets: sets.length, weight_kg: top || null }).eq("id", entryId);
   if (userId && exercise) await syncGoalsForExercise(userId, exercise);
 }
+
+// ---- Session time ----
+export async function saveSession(userId, seconds) {
+  if (!seconds || seconds < 5) return null;
+  return supabase.from("workout_sessions").insert({ user_id: userId, seconds: Math.round(seconds) });
+}
+export async function loadSessionSeconds(userId, date) {
+  const { data } = await supabase.from("workout_sessions").select("seconds").eq("user_id", userId).eq("log_date", date);
+  return (data || []).reduce((n, s) => n + (s.seconds || 0), 0);
+}

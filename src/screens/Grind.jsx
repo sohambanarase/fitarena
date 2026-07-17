@@ -6,6 +6,7 @@ import {
   logExercise, loadEntries, removeEntry, setsOf,
   loadPlans, savePlan, deletePlan, logPlan,
   loadCustomExercises, addCustomExercise, updateEntry,
+  saveSession, loadSessionSeconds,
 } from "../lib/grind.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
 import Sheet from "../components/Sheet.jsx";
@@ -95,9 +96,23 @@ export default function Grind() {
   const [detail, setDetail] = useState(null);
   const [editPlan, setEditPlan] = useState(undefined); // undefined=closed, null=new, obj=edit
   const [logQueue, setLogQueue] = useState(null);
+  const [logStart, setLogStart] = useState(0);
   const [sessionStart, setSessionStart] = useState(() => { try { const v = localStorage.getItem("fitarena.session"); return v ? Number(v) : null; } catch { return null; } });
   const startSession = useCallback(() => { setSessionStart((cur) => { if (cur) return cur; const t = Date.now(); try { localStorage.setItem("fitarena.session", String(t)); } catch {} return t; }); }, []);
-  const stopSession = () => { try { localStorage.removeItem("fitarena.session"); } catch {} setSessionStart(null); };
+  const [daySeconds, setDaySeconds] = useState(0);
+  const refreshSessions = useCallback(() => loadSessionSeconds(user.id, date).then(setDaySeconds), [user.id, date]);
+  useEffect(() => { refreshSessions(); }, [refreshSessions]);
+  const stopSession = async () => {
+    const startedAt = sessionStart;
+    try { localStorage.removeItem("fitarena.session"); } catch {}
+    setSessionStart(null);
+    if (startedAt) { await saveSession(user.id, (Date.now() - startedAt) / 1000); refreshSessions(); }
+  };
+  const planStartIndex = useCallback((plan) => {
+    const done = new Set(entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase()));
+    const idx = plan.exercises.findIndex((it) => !done.has(it.exercise.toLowerCase()));
+    return idx < 0 ? 0 : idx;
+  }, [entries, date]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,7 +146,7 @@ export default function Grind() {
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
 
-      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} />
+      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} loggedSecs={daySeconds} />
 
       {/* Log / Planner switch */}
       <div className="glass grid grid-cols-2 gap-1 rounded-2xl p-1">
@@ -167,7 +182,7 @@ export default function Grind() {
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="eyebrow flex items-center gap-1"><Dumbbell size={12} /> Workout</p>
-              <button onClick={() => { setLogQueue(null); setLogging(true); }} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Log workout</button>
+              <button onClick={() => { setLogQueue(null); setLogStart(0); setLogging(true); }} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Log workout</button>
             </div>
             {dayEntries.length === 0
               ? <p className="text-sm text-muted">Nothing logged for {dayLabel(date).toLowerCase()}. Tap "Log workout".</p>
@@ -203,7 +218,7 @@ export default function Grind() {
                       <p className="truncate font-bold">{p.name}</p>
                       <p className="text-[11px] text-muted">{p.exercises.length} exercise{p.exercises.length !== 1 ? "s" : ""}</p>
                     </div>
-                    <button onClick={() => { setLogQueue(p.exercises); setLogging(true); }} className="btn-primary flex items-center gap-1 px-3 py-2 text-sm"><Play size={14} /> Start</button>
+                    <button onClick={() => { setLogQueue(p.exercises); setLogStart(planStartIndex(p)); setLogging(true); }} className="btn-primary flex items-center gap-1 px-3 py-2 text-sm"><Play size={14} /> Start</button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {p.exercises.slice(0, 4).map((x, i) => <span key={i} className="rounded-md bg-surface2 px-2 py-0.5 text-[11px] capitalize text-muted">{x.exercise}</span>)}
@@ -221,7 +236,7 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
-      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); }} onDone={load} />}
+      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} startIndex={logStart} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
       {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
       {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} registerCustom={registerCustom} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
     </div>
@@ -323,11 +338,11 @@ function fmtClock(s) {
 }
 
 // Session timer bar — manual start, auto-starts on first logged set, stop when done.
-function SessionBar({ start, onStart, onStop }) {
+function SessionBar({ start, onStart, onStop, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
   if (!start)
-    return <button onClick={onStart} className="glass flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]"><Timer size={15} /> Start gym session</button>;
+    return <button onClick={onStart} className="glass flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]"><Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}</button>;
   const s = Math.max(0, Math.floor((now - start) / 1000));
   return (
     <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
@@ -402,12 +417,12 @@ function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
 // Unified log engine. Normal mode: pick → sets → entry. Plan mode (queue): walks the
 // plan exercise-by-exercise, pre-filling each set with the target (editable), with rest
 // timers between sets AND between exercises. Auto-starts the session on the first set.
-function LogFlow({ userId, date, exercises, registerCustom, queue, startSession, onClose, onDone }) {
+function LogFlow({ userId, date, exercises, registerCustom, queue, startIndex = 0, startSession, onClose, onDone }) {
   const isPlan = Array.isArray(queue) && queue.length > 0;
   const exByNameLocal = useMemo(() => { const m = {}; exercises.forEach((e) => (m[e.name.toLowerCase()] = e)); return m; }, [exercises]);
   const resolveEx = useCallback((name, i) => exByNameLocal[name.toLowerCase()] || { id: "q" + i, name, images: [], muscle: "" }, [exByNameLocal]);
 
-  const [qIdx, setQIdx] = useState(0);
+  const [qIdx, setQIdx] = useState(startIndex || 0);
   const [step, setStep] = useState("pick");
   const [ex, setEx] = useState(null);
   const [count, setCount] = useState(0);
@@ -432,7 +447,7 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startSession,
 
   // plan mode: jump straight into the first exercise
   useEffect(() => {
-    if (isPlan) { const it = queue[0]; enterEntry(resolveEx(it.exercise, 0), Number(it.sets) || 3, { weight: it.weight, reps: it.reps }); }
+    if (isPlan) { const i0 = startIndex || 0; const it = queue[i0]; enterEntry(resolveEx(it.exercise, i0), Number(it.sets) || 3, { weight: it.weight, reps: it.reps }); }
     else setStep("pick");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -496,8 +511,11 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startSession,
             if (i === cur) return (
               <div key={i} className="rounded-xl border-2 border-gold bg-surface px-4 py-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="font-bold text-gold">Set {i + 1}</p>
-                  {sets.length > 0 && <button onClick={sameAsLast} className="pill flex items-center gap-1"><CopyIcon size={12} /> same as last</button>}
+                  <p className="font-bold text-gold">Set {i + 1} <span className="text-[11px] font-normal text-muted">of {count}</span></p>
+                  <div className="flex gap-1.5">
+                    {sets.length > 0 && <button onClick={sameAsLast} className="pill flex items-center gap-1"><CopyIcon size={12} /> same as last</button>}
+                    <button onClick={() => setCount(count + 1)} className="pill flex items-center gap-1"><Plus size={12} /> set</button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <input className="inp py-4 text-center text-lg font-bold" inputMode="decimal" placeholder="kg" value={w} onChange={(e) => setW(e.target.value)} autoFocus />
