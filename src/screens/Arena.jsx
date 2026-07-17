@@ -15,7 +15,8 @@ import CountUp from "../components/CountUp.jsx";
 import { ChevronDown, UserPlus, Share2, Plus, Trophy, UserMinus, Crown, Trash2 } from "lucide-react";
 
 export default function Arena() {
-  const { user, activeChallenge , refresh } = useAuth();
+  const { user, profile, activeChallenge , refresh } = useAuth();
+  const navigate = useNavigate();
   const [board, setBoard] = useState([]);
   const [wins, setWins] = useState([]);
   const [names, setNames] = useState({});
@@ -101,7 +102,9 @@ export default function Arena() {
   return (
     <div className="screen animate-screen space-y-3">
       <header className="flex items-center gap-2 pt-1">
-        <span className="w-14 shrink-0 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">Arena</span>
+        <button onClick={() => navigate("/profile")} aria-label="Profile" className="grid h-10 w-10 shrink-0 place-items-center rounded-full p-[2px] active:scale-95" style={{ background: "var(--grad-gold)" }}>
+          <span className="grid h-full w-full place-items-center rounded-full bg-ink font-display text-sm text-gold">{(profile?.name || "A")[0].toUpperCase()}</span>
+        </button>
         <button
           onClick={() => setSheet("switch")}
           className="glass mx-auto flex min-w-0 max-w-[62%] items-center gap-1.5 rounded-full px-4 py-2.5 active:scale-95"

@@ -236,7 +236,7 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
-      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} startIndex={logStart} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
+      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
       {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
       {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} registerCustom={registerCustom} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
     </div>
@@ -417,12 +417,14 @@ function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
 // Unified log engine. Normal mode: pick → sets → entry. Plan mode (queue): walks the
 // plan exercise-by-exercise, pre-filling each set with the target (editable), with rest
 // timers between sets AND between exercises. Auto-starts the session on the first set.
-function LogFlow({ userId, date, exercises, registerCustom, queue, startIndex = 0, startSession, onClose, onDone }) {
+function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [], startSession, onClose, onDone }) {
   const isPlan = Array.isArray(queue) && queue.length > 0;
   const exByNameLocal = useMemo(() => { const m = {}; exercises.forEach((e) => (m[e.name.toLowerCase()] = e)); return m; }, [exercises]);
   const resolveEx = useCallback((name, i) => exByNameLocal[name.toLowerCase()] || { id: "q" + i, name, images: [], muscle: "" }, [exByNameLocal]);
 
-  const [qIdx, setQIdx] = useState(startIndex || 0);
+  const [qIdx, setQIdx] = useState(0);
+  const [sessionDone, setSessionDone] = useState([]);
+  const doneSet = useMemo(() => new Set([...(doneNames || []), ...sessionDone].map((n) => n.toLowerCase())), [doneNames, sessionDone]);
   const [step, setStep] = useState("pick");
   const [ex, setEx] = useState(null);
   const [count, setCount] = useState(0);
@@ -446,11 +448,8 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startIndex = 
   }, []);
 
   // plan mode: jump straight into the first exercise
-  useEffect(() => {
-    if (isPlan) { const i0 = startIndex || 0; const it = queue[i0]; enterEntry(resolveEx(it.exercise, i0), Number(it.sets) || 3, { weight: it.weight, reps: it.reps }); }
-    else setStep("pick");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { setStep(isPlan ? "chooser" : "pick"); /* eslint-disable-next-line */ }, []);
+  function beginPlanExercise(i) { const it = queue[i]; setQIdx(i); enterEntry(resolveEx(it.exercise, i), Number(it.sets) || 3, { weight: it.weight, reps: it.reps }); }
 
   const prefill = (tgt) => { setW(tgt && tgt.weight != null && tgt.weight !== "" ? String(tgt.weight) : ""); setR(tgt && tgt.reps != null && tgt.reps !== "" ? String(tgt.reps) : ""); };
 
@@ -466,22 +465,36 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startIndex = 
 
   async function finish() {
     setBusy(true); await logExercise(userId, date, ex.name, sets); setBusy(false); onDone();
-    setRestSince(Date.now()); setRestNow(Date.now());
-    if (isPlan && qIdx >= queue.length - 1) { onClose(); return; }
-    setStep("rest");
-  }
-  function startNext() {
-    const ni = qIdx + 1; setQIdx(ni); const it = queue[ni];
-    enterEntry(resolveEx(it.exercise, ni), Number(it.sets) || 3, { weight: it.weight, reps: it.reps });
+    if (isPlan) { setSessionDone((prev) => [...prev, ex.name.toLowerCase()]); setRestSince(null); setStep("chooser"); return; }
+    setRestSince(Date.now()); setRestNow(Date.now()); setStep("rest");
   }
   function logAnother() { setEx(null); setCount(0); setSets([]); setCur(0); setTarget(null); setRestSince(null); setStep("pick"); }
 
-  const title = step === "pick" ? "What did you train?" : step === "rest" ? "Rest" : (ex?.name || "Log");
-  const nextName = isPlan && qIdx < queue.length - 1 ? queue[qIdx + 1].exercise : null;
+  const title = step === "chooser" ? "Your plan" : step === "pick" ? "What did you train?" : step === "rest" ? "Rest" : (ex?.name || "Log");
 
   return (
     <Sheet title={title} onClose={onClose}>
       {step === "pick" && <ExercisePicker exercises={exercises} userId={userId} registerCustom={registerCustom} onPick={pickExercise} />}
+
+      {step === "chooser" && (
+        <div className="space-y-2">
+          <p className="eyebrow">Tap an exercise to log{doneSet.size > 0 ? " · " + doneSet.size + " done today" : ""}</p>
+          {queue.map((it, i) => {
+            const done = doneSet.has(it.exercise.toLowerCase());
+            return (
+              <button key={i} onClick={() => beginPlanExercise(i)} className={"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition active:scale-[.99] " + (done ? "bg-surface2 opacity-70" : "panel")}>
+                <Thumb ex={exByNameLocal[it.exercise.toLowerCase()] || { name: it.exercise }} size={40} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-bold capitalize">{it.exercise}</p>
+                  <p className="text-[11px] text-muted">{it.sets} × {it.reps || "?"}{it.weight ? " · " + it.weight + "kg" : ""}{done ? " · logged" : ""}</p>
+                </div>
+                {done ? <Check size={18} className="shrink-0 text-mint" /> : <Play size={16} className="shrink-0 text-gold" />}
+              </button>
+            );
+          })}
+          <button onClick={onClose} className="pill mx-auto mt-2 block px-6 py-2">Done for now</button>
+        </div>
+      )}
 
       {step === "count" && (
         <div className="space-y-3">
@@ -501,7 +514,8 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startIndex = 
               <button onClick={() => setRestSince(null)} className="text-[11px] font-semibold text-muted">dismiss</button>
             </div>
           )}
-          {isPlan && <p className="eyebrow">Exercise {qIdx + 1} of {queue.length}{target ? " · target " + (target.weight || "?") + "kg × " + (target.reps || "?") : ""}</p>}
+          {isPlan && <button onClick={() => setStep("chooser")} className="pill">← Back to plan</button>}
+          {isPlan && <p className="eyebrow">{ex?.name}{target ? " · target " + (target.weight || "?") + "kg × " + (target.reps || "?") : ""}</p>}
           {Array.from({ length: count }).map((_, i) => {
             if (i < cur) { const s = sets[i]; return (
               <div key={i} className="flex items-center justify-between rounded-xl border border-line bg-surface2 px-4 py-3 text-sm">
@@ -540,15 +554,11 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startIndex = 
           <div className="mx-auto grid h-28 w-28 place-items-center rounded-full border-4 border-gold">
             <span className="font-score text-3xl font-bold text-gold">{fmtClock(restSecs)}</span>
           </div>
-          <p className="eyebrow">{nextName ? "Rest — up next: " + nextName : "Rest"}</p>
-          {nextName ? (
-            <button className="btn-primary w-full py-4 text-base" onClick={startNext}>Start next: {nextName}</button>
-          ) : (
-            <div className="space-y-2">
-              <button className="btn-primary w-full py-4 text-base" onClick={logAnother}>Log another exercise</button>
-              <button className="pill mx-auto block px-6 py-2" onClick={onClose}>Done for now</button>
-            </div>
-          )}
+          <p className="eyebrow">Rest</p>
+          <div className="space-y-2">
+            <button className="btn-primary w-full py-4 text-base" onClick={logAnother}>Log another exercise</button>
+            <button className="pill mx-auto block px-6 py-2" onClick={onClose}>Done for now</button>
+          </div>
         </div>
       )}
     </Sheet>

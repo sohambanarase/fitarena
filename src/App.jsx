@@ -8,6 +8,7 @@ import Grind from "./screens/Grind.jsx";
 import Coach from "./screens/Coach.jsx";
 import Playbook from "./screens/Playbook.jsx";
 import Profile from "./screens/Profile.jsx";
+import Count from "./screens/Count.jsx";
 
 export default function App() {
   const { session, loading } = useAuth();
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/coach" element={<Coach />} />
         <Route path="/playbook" element={<Playbook />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/count" element={<Count />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <BottomNav />

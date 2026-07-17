@@ -1,0 +1,447 @@
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { toISO } from "../lib/streak.js";
+import ScreenHeader from "../components/ScreenHeader.jsx";
+import Sheet from "../components/Sheet.jsx";
+import Loader from "../components/Loader.jsx";
+import QuantityScale from "../components/QuantityScale.jsx";
+import {
+  MEALS, MEAL_LABELS, QUICK_FOODS,
+  loadGoals, saveGoals, addFood, searchFoods, recentFoods,
+  loadLogs, logFood, removeLog, macrosFor, dayTotals, lookupBarcode,
+} from "../lib/nutrition.js";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera } from "lucide-react";
+
+const num = (v) => (v === "" || v == null ? null : Number(v));
+
+/* progress ring */
+function Ring({ value, goal, size = 128, stroke = 11, color = "rgb(var(--c-gold))", children }) {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  const pct = goal > 0 ? Math.min(1, value / goal) : 0;
+  return (
+    <div className="relative grid place-items-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: "rgb(var(--c-surface2))" }} strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: color, strokeDashoffset: c * (1 - pct), transition: "stroke-dashoffset .6s ease" }} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} />
+      </svg>
+      <div className="absolute grid place-items-center text-center">{children}</div>
+    </div>
+  );
+}
+function MacroBar({ label, value, goal, color, star }) {
+  const pct = goal > 0 ? Math.min(100, Math.round((value / goal) * 100)) : 0;
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className={"text-xs font-bold " + (star ? "text-mint" : "text-muted")}>{label}{star ? " ★" : ""}</span>
+        <span className="font-score text-[11px]">{Math.round(value)}{goal ? " / " + goal : ""} g</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-surface2"><div className="h-full rounded-full" style={{ width: pct + "%", background: color }} /></div>
+    </div>
+  );
+}
+
+export default function Count() {
+  const { user } = useAuth();
+  const date = toISO(new Date());
+  const [goals, setGoals] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showGoals, setShowGoals] = useState(false);
+  const [add, setAdd] = useState(null); // { view, meal }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [g, l] = await Promise.all([loadGoals(user.id), loadLogs(user.id, date)]);
+    setGoals(g); setLogs(l); setLoading(false);
+  }, [user.id, date]);
+  useEffect(() => { load(); }, [load]);
+
+  const t = dayTotals(logs);
+  const calGoal = goals?.calories_goal || 0;
+  const remaining = calGoal ? Math.round(calGoal - t.calories) : null;
+  const byMeal = useMemo(() => {
+    const m = {}; MEALS.forEach((k) => (m[k] = []));
+    logs.forEach((l) => (m[l.meal_type] || (m[l.meal_type] = [])).push(l));
+    return m;
+  }, [logs]);
+
+  const actions = [
+    { key: "barcode", label: "Scan", Icon: ScanLine },
+    { key: "search", label: "Search", Icon: Search },
+    { key: "manual", label: "Add food", Icon: PencilLine },
+    { key: "quick", label: "Quick add", Icon: Zap },
+    { key: "ai", label: "Use AI", Icon: Sparkles },
+    { key: "custom", label: "Custom", Icon: Apple },
+  ];
+
+  return (
+    <div className="screen animate-screen space-y-4">
+      <ScreenHeader eyebrow="Nutrition" title="Count" right={
+        <button onClick={() => setShowGoals(true)} className="grid h-9 w-9 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Settings size={18} /></button>
+      } />
+
+      {loading ? <Loader label="Loading your day…" /> : (
+        <>
+          {/* hero: calories ring + protein prioritized */}
+          <div className="card">
+            {!calGoal && !goals?.protein_goal ? (
+              <button onClick={() => setShowGoals(true)} className="w-full py-2 text-center">
+                <p className="font-bold">Set your goals to get started</p>
+                <p className="text-sm text-muted">Add a daily calorie and protein target.</p>
+              </button>
+            ) : (
+              <div className="flex items-center gap-4">
+                <Ring value={t.calories} goal={calGoal}>
+                  <p className="font-score text-2xl font-bold">{remaining != null ? remaining : Math.round(t.calories)}</p>
+                  <p className="text-[10px] text-muted">{remaining != null ? "kcal left" : "kcal"}</p>
+                </Ring>
+                <div className="min-w-0 flex-1 space-y-2.5">
+                  <div>
+                    <div className="mb-1 flex items-baseline justify-between">
+                      <span className="text-sm font-bold text-mint">Protein ★</span>
+                      <span className="font-score text-sm font-bold">{Math.round(t.protein)}{goals?.protein_goal ? " / " + goals.protein_goal : ""} g</span>
+                    </div>
+                    <div className="h-3 w-full overflow-hidden rounded-full bg-surface2"><div className="h-full rounded-full" style={{ width: (goals?.protein_goal ? Math.min(100, (t.protein / goals.protein_goal) * 100) : 0) + "%", background: "var(--grad-mint)" }} /></div>
+                    {goals?.protein_goal && t.protein < goals.protein_goal && <p className="mt-1 text-[11px] text-muted">{Math.round(goals.protein_goal - t.protein)}g protein to go</p>}
+                  </div>
+                  <MacroBar label="Carbs" value={t.carbs} goal={goals?.carbs_goal} color="var(--grad-gold)" />
+                  <MacroBar label="Fat" value={t.fat} goal={goals?.fat_goal} color="var(--grad-ember)" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* quick actions */}
+          <div className="grid grid-cols-3 gap-2">
+            {actions.map(({ key, label, Icon }) => (
+              <button key={key} onClick={() => setAdd({ view: key, meal: "snacks" })} className="glass flex flex-col items-center gap-1.5 rounded-2xl py-3 active:scale-95">
+                <Icon size={20} className="text-gold" />
+                <span className="text-[11px] font-bold">{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* meals */}
+          {logs.length === 0 && (
+            <div className="panel text-center">
+              <p className="font-bold">No food logged yet today.</p>
+              <p className="mt-1 text-sm text-muted">Start by scanning a barcode or adding your first meal. Track protein and calories to support your progress.</p>
+            </div>
+          )}
+          <div className="space-y-3">
+            {MEALS.map((meal) => {
+              const items = byMeal[meal] || [];
+              const mt = items.reduce((a, i) => ({ cal: a.cal + (Number(i.calculated_calories) || 0), p: a.p + (Number(i.calculated_protein) || 0) }), { cal: 0, p: 0 });
+              return (
+                <section key={meal} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <p className="eyebrow">{MEAL_LABELS[meal]}{items.length ? " · " + Math.round(mt.cal) + " kcal · " + Math.round(mt.p) + "g P" : ""}</p>
+                    <button onClick={() => setAdd({ view: "home", meal })} className="pill flex items-center gap-1"><Plus size={13} /> Add</button>
+                  </div>
+                  {items.map((i) => (
+                    <div key={i.id} className="panel flex items-center gap-3 p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-bold capitalize">{i.name}</p>
+                        <p className="text-[11px] text-muted">{i.quantity}{i.quantity_unit} · {Math.round(i.calculated_calories || 0)} kcal · {Math.round(i.calculated_protein || 0)}g P</p>
+                      </div>
+                      <button onClick={async () => { await removeLog(i.id); load(); }} className="text-muted active:scale-90 hover:text-ember"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </section>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {showGoals && <GoalsSheet userId={user.id} goals={goals} onClose={() => setShowGoals(false)} onSaved={load} />}
+      {add && <AddFoodSheet userId={user.id} date={date} initial={add} onClose={() => setAdd(null)} onLogged={load} />}
+    </div>
+  );
+}
+
+/* ---------- Goals ---------- */
+function GoalsSheet({ userId, goals, onClose, onSaved }) {
+  const [f, setF] = useState({
+    calories_goal: goals?.calories_goal || "", protein_goal: goals?.protein_goal || "",
+    carbs_goal: goals?.carbs_goal || "", fat_goal: goals?.fat_goal || "", goal_type: goals?.goal_type || "maintain",
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF({ ...f, [k]: v });
+  return (
+    <Sheet title="Daily goals" onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <p className="eyebrow mb-1">Goal</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[["lose", "Lose fat"], ["maintain", "Maintain"], ["gain", "Build muscle"]].map(([v, l]) => (
+              <button key={v} onClick={() => set("goal_type", v)} className={"pill py-2 " + (f.goal_type === v ? "pill-on" : "")}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <Field label="Calories (kcal)" value={f.calories_goal} onChange={(v) => set("calories_goal", v)} />
+        <Field label="Protein (g) ★" value={f.protein_goal} onChange={(v) => set("protein_goal", v)} />
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Carbs (g)" value={f.carbs_goal} onChange={(v) => set("carbs_goal", v)} />
+          <Field label="Fat (g)" value={f.fat_goal} onChange={(v) => set("fat_goal", v)} />
+        </div>
+        <button className="btn-primary w-full" disabled={busy} onClick={async () => {
+          setBusy(true);
+          await saveGoals(userId, { calories_goal: num(f.calories_goal), protein_goal: num(f.protein_goal), carbs_goal: num(f.carbs_goal), fat_goal: num(f.fat_goal), goal_type: f.goal_type });
+          setBusy(false); onSaved(); onClose();
+        }}>{busy ? "Saving…" : "Save goals"}</button>
+      </div>
+    </Sheet>
+  );
+}
+function Field({ label, value, onChange }) {
+  return <label className="block"><span className="eyebrow mb-1 block">{label}</span>
+    <input className="inp" inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} /></label>;
+}
+
+/* ---------- Add food (search / manual / barcode / quick / ai) → review ---------- */
+function AddFoodSheet({ userId, date, initial, onClose, onLogged }) {
+  const [view, setView] = useState(initial.view === "home" ? "home" : initial.view);
+  const [meal, setMeal] = useState(initial.meal || "snacks");
+  const [review, setReview] = useState(null); // food object to review
+
+  const openReview = (food) => { setReview(food); setView("review"); };
+
+  return (
+    <Sheet title={review ? review.name : titleFor(view)} onClose={onClose}>
+      {view === "home" && <HomeChooser onPick={setView} />}
+      {view === "search" && <SearchView userId={userId} onPick={openReview} />}
+      {view === "quick" && <QuickView onPick={openReview} />}
+      {view === "manual" && <ManualView userId={userId} save onPick={openReview} />}
+      {view === "custom" && <ManualView userId={userId} save onPick={openReview} />}
+      {view === "barcode" && <BarcodeView onPick={openReview} />}
+      {view === "ai" && <AIView userId={userId} onLog={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} meal={meal} setMeal={setMeal} />}
+      {view === "review" && review && (
+        <ReviewFood food={review} meal={meal} setMeal={setMeal} userId={userId}
+          onAdd={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} />
+      )}
+    </Sheet>
+  );
+}
+function titleFor(v) {
+  return { home: "Add food", search: "Search food", quick: "Quick add", manual: "Add food", custom: "Custom food", barcode: "Scan barcode", ai: "AI estimate", review: "Review" }[v] || "Add food";
+}
+function HomeChooser({ onPick }) {
+  const opts = [
+    ["barcode", "Scan barcode", ScanLine], ["search", "Search food", Search],
+    ["manual", "Add manually", PencilLine], ["quick", "Quick add", Zap],
+    ["ai", "Use AI", Sparkles], ["custom", "Create custom food", Apple],
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {opts.map(([k, l, Icon]) => (
+        <button key={k} onClick={() => onPick(k)} className="glass flex flex-col items-center gap-2 rounded-2xl py-5 active:scale-95">
+          <Icon size={22} className="text-gold" /><span className="text-sm font-bold">{l}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SearchView({ userId, onPick }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [recent, setRecent] = useState([]);
+  useEffect(() => { recentFoods(userId).then(setRecent); }, [userId]);
+  useEffect(() => { const t = setTimeout(() => searchFoods(userId, q).then(setResults), 250); return () => clearTimeout(t); }, [q, userId]);
+  const list = q.trim() ? results : recent;
+  return (
+    <div className="space-y-2">
+      <div className="search-glass"><Search size={18} className="text-muted" /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+      {!q.trim() && recent.length > 0 && <p className="eyebrow">Recent</p>}
+      <div className="max-h-[50vh] space-y-1.5 overflow-y-auto">
+        {list.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
+        {list.length === 0 && <p className="px-1 text-sm text-muted">{q.trim() ? "No match. Add it manually or via AI." : "No foods yet — add one below."}</p>}
+      </div>
+    </div>
+  );
+}
+function QuickView({ onPick }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="eyebrow">Gym staples · tap to log</p>
+      <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
+        {QUICK_FOODS.map((f, i) => <FoodRow key={i} food={f} onClick={() => onPick({ ...f, source: "quickadd" })} />)}
+      </div>
+    </div>
+  );
+}
+function FoodRow({ food, onClick }) {
+  return (
+    <button onClick={onClick} className="panel flex w-full items-center gap-3 p-2.5 text-left active:scale-[.99]">
+      {food.image_url ? <img src={food.image_url} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" /> : <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface2 font-display text-line">{(food.name || "?")[0].toUpperCase()}</div>}
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-bold capitalize">{food.name}</p>
+        <p className="text-[11px] text-muted">{food.brand ? food.brand + " · " : ""}{Math.round(food.calories_per_100g || 0)} kcal · {food.protein_per_100g || 0}g P /100g</p>
+      </div>
+    </button>
+  );
+}
+
+function ManualView({ userId, onPick }) {
+  const [f, setF] = useState({ name: "", brand: "", calories_per_100g: "", protein_per_100g: "", carbs_per_100g: "", fat_per_100g: "", sugar_per_100g: "", salt_per_100g: "", fiber_per_100g: "", serving_size: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const ok = f.name.trim() && f.calories_per_100g !== "";
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Nutrition per 100g. Saved to your foods for reuse.</p>
+      <input className="inp" placeholder="Food name" value={f.name} onChange={(e) => set("name", e.target.value)} />
+      <input className="inp" placeholder="Brand (optional)" value={f.brand} onChange={(e) => set("brand", e.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Calories /100g" value={f.calories_per_100g} onChange={(v) => set("calories_per_100g", v)} />
+        <Field label="Protein /100g ★" value={f.protein_per_100g} onChange={(v) => set("protein_per_100g", v)} />
+        <Field label="Carbs /100g" value={f.carbs_per_100g} onChange={(v) => set("carbs_per_100g", v)} />
+        <Field label="Fat /100g" value={f.fat_per_100g} onChange={(v) => set("fat_per_100g", v)} />
+        <Field label="Sugar (opt)" value={f.sugar_per_100g} onChange={(v) => set("sugar_per_100g", v)} />
+        <Field label="Serving g (opt)" value={f.serving_size} onChange={(v) => set("serving_size", v)} />
+      </div>
+      <button className="btn-primary w-full" disabled={!ok || busy} onClick={async () => {
+        setBusy(true);
+        const payload = { user_id: userId, source: "custom", name: f.name.trim(), brand: f.brand.trim() || null };
+        ["calories_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g", "sugar_per_100g", "salt_per_100g", "fiber_per_100g", "serving_size"].forEach((k) => (payload[k] = num(f[k])));
+        const { data } = await addFood(payload);
+        setBusy(false); onPick(data || payload);
+      }}>{busy ? "Saving…" : "Save & continue"}</button>
+    </div>
+  );
+}
+
+function BarcodeView({ onPick }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  async function lookup() {
+    setBusy(true); setErr(null);
+    const food = await lookupBarcode(code.trim());
+    setBusy(false);
+    if (!food) { setErr("We couldn't find this product. Add it manually, use AI, or search food."); return; }
+    onPick(food);
+  }
+  return (
+    <div className="space-y-3">
+      {/* Camera scanning is a next step (needs a scanner lib + camera permission). Manual entry works now. */}
+      <div className="panel flex items-center gap-3">
+        <Camera size={20} className="text-muted" />
+        <p className="text-sm text-muted">Live camera scanning is coming next. For now, type or paste the barcode below — it looks the product up on Open Food Facts (great for EU/German products).</p>
+      </div>
+      <div className="search-glass"><Barcode size={18} className="text-muted" /><input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter barcode number" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+      {err && <p className="text-sm text-ember">{err}</p>}
+      <button className="btn-primary w-full" disabled={!code.trim() || busy} onClick={lookup}>{busy ? "Looking up…" : "Look up product"}</button>
+    </div>
+  );
+}
+
+function AIView({ userId, onLog, meal, setMeal }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [est, setEst] = useState(null); // {calories,protein,carbs,fat}
+  const [err, setErr] = useState(null);
+  async function estimate() {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meal: text }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { setErr(j.error || "Couldn't estimate. Try rephrasing."); }
+      else setEst({ calories: j.calories, protein: j.protein, carbs: j.carbs, fat: j.fat });
+    } catch { setErr("AI is offline right now."); }
+    setBusy(false);
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Describe your meal, e.g. “200g cooked rice, 150g chicken breast, 1 spoon olive oil”. AI estimates the macros — you can edit before saving.</p>
+      <textarea className="inp min-h-[90px]" value={text} onChange={(e) => setText(e.target.value)} placeholder="Describe what you ate…" />
+      {err && <p className="text-sm text-ember">{err}</p>}
+      {!est ? (
+        <button className="btn-primary w-full" disabled={!text.trim() || busy} onClick={estimate}>{busy ? "Estimating…" : "Estimate with AI"}</button>
+      ) : (
+        <div className="space-y-3">
+          <p className="eyebrow">Estimate (editable) · AI estimate</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Calories" value={est.calories ?? ""} onChange={(v) => setEst({ ...est, calories: num(v) })} />
+            <Field label="Protein g ★" value={est.protein ?? ""} onChange={(v) => setEst({ ...est, protein: num(v) })} />
+            <Field label="Carbs g" value={est.carbs ?? ""} onChange={(v) => setEst({ ...est, carbs: num(v) })} />
+            <Field label="Fat g" value={est.fat ?? ""} onChange={(v) => setEst({ ...est, fat: num(v) })} />
+          </div>
+          <MealPicker meal={meal} setMeal={setMeal} />
+          <button className="btn-primary w-full" onClick={() => onLog({
+            name: text.trim().slice(0, 60), quantity: 1, quantity_unit: "meal",
+            calculated_calories: est.calories, calculated_protein: est.protein, calculated_carbs: est.carbs, calculated_fat: est.fat,
+          })}>Add to today</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MealPicker({ meal, setMeal }) {
+  return (
+    <div>
+      <p className="eyebrow mb-1">Meal</p>
+      <div className="flex flex-wrap gap-1.5">
+        {MEALS.map((m) => <button key={m} onClick={() => setMeal(m)} className={"pill " + (meal === m ? "pill-on" : "")}>{MEAL_LABELS[m]}</button>)}
+      </div>
+    </div>
+  );
+}
+
+function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
+  const [f, setF] = useState({ ...food });
+  const [grams, setGrams] = useState(food.serving_size ? Number(food.serving_size) : 100);
+  const [edit, setEdit] = useState(false);
+  const m = macrosFor(f, grams);
+  const setField = (k, v) => setF({ ...f, [k]: v });
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        {f.image_url ? <img src={f.image_url} alt="" className="h-14 w-14 rounded-xl object-cover" /> : null}
+        <div className="min-w-0"><p className="truncate font-bold capitalize">{f.name}</p>{f.brand && <p className="text-[11px] text-muted">{f.brand}</p>}{f.barcode && <p className="text-[10px] text-muted">#{f.barcode}</p>}</div>
+      </div>
+
+      <div className="panel">
+        <div className="mb-1.5 flex items-center justify-between"><p className="eyebrow">Per 100g</p><button onClick={() => setEdit(!edit)} className="pill">{edit ? "done" : "edit values"}</button></div>
+        {edit ? (
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Calories" value={f.calories_per_100g ?? ""} onChange={(v) => setField("calories_per_100g", num(v))} />
+            <Field label="Protein" value={f.protein_per_100g ?? ""} onChange={(v) => setField("protein_per_100g", num(v))} />
+            <Field label="Carbs" value={f.carbs_per_100g ?? ""} onChange={(v) => setField("carbs_per_100g", num(v))} />
+            <Field label="Fat" value={f.fat_per_100g ?? ""} onChange={(v) => setField("fat_per_100g", num(v))} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-1 text-center text-sm">
+            <div><p className="font-score font-bold">{Math.round(f.calories_per_100g || 0)}</p><p className="text-[10px] text-muted">kcal</p></div>
+            <div><p className="font-score font-bold text-mint">{f.protein_per_100g || 0}</p><p className="text-[10px] text-muted">protein</p></div>
+            <div><p className="font-score font-bold">{f.carbs_per_100g || 0}</p><p className="text-[10px] text-muted">carbs</p></div>
+            <div><p className="font-score font-bold">{f.fat_per_100g || 0}</p><p className="text-[10px] text-muted">fat</p></div>
+          </div>
+        )}
+      </div>
+
+      <QuantityScale value={grams} onChange={setGrams} servingSize={food.serving_size ? Number(food.serving_size) : null} />
+
+      <div className="card">
+        <p className="eyebrow mb-1">This serving · {grams}g</p>
+        <div className="grid grid-cols-4 gap-1 text-center">
+          <div><p className="font-score text-lg font-bold text-gold">{m.calories}</p><p className="text-[10px] text-muted">kcal</p></div>
+          <div><p className="font-score text-lg font-bold text-mint">{m.protein ?? 0}</p><p className="text-[10px] text-muted">protein</p></div>
+          <div><p className="font-score text-lg font-bold">{m.carbs ?? 0}</p><p className="text-[10px] text-muted">carbs</p></div>
+          <div><p className="font-score text-lg font-bold">{m.fat ?? 0}</p><p className="text-[10px] text-muted">fat</p></div>
+        </div>
+      </div>
+
+      <MealPicker meal={meal} setMeal={setMeal} />
+
+      <button className="btn-primary w-full py-4 text-base" onClick={() => onAdd({
+        food_id: food.id || null, name: f.name, quantity: grams, quantity_unit: "g", quantity_grams: grams,
+        calculated_calories: m.calories, calculated_protein: m.protein, calculated_carbs: m.carbs, calculated_fat: m.fat,
+        calculated_sugar: m.sugar, calculated_salt: m.salt, calculated_fiber: m.fiber,
+      })}>Add to {MEAL_LABELS[meal]}</button>
+    </div>
+  );
+}

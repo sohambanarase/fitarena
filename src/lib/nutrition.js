@@ -1,0 +1,111 @@
+import { supabase } from "./supabase.js";
+
+export const MEALS = ["breakfast", "lunch", "dinner", "snacks", "pre-workout", "post-workout"];
+export const MEAL_LABELS = {
+  breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner",
+  snacks: "Snacks", "pre-workout": "Pre-workout", "post-workout": "Post-workout",
+};
+
+// Gym-focused one-tap presets (per 100g). Customizable later (TODO).
+export const QUICK_FOODS = [
+  { name: "Whey protein", calories_per_100g: 400, protein_per_100g: 80, carbs_per_100g: 8, fat_per_100g: 6, serving_size: 30 },
+  { name: "Chicken breast", calories_per_100g: 165, protein_per_100g: 31, carbs_per_100g: 0, fat_per_100g: 3.6, serving_size: 150 },
+  { name: "Whole eggs", calories_per_100g: 143, protein_per_100g: 13, carbs_per_100g: 1.1, fat_per_100g: 9.5, serving_size: 50 },
+  { name: "Cooked rice", calories_per_100g: 130, protein_per_100g: 2.7, carbs_per_100g: 28, fat_per_100g: 0.3, serving_size: 150 },
+  { name: "Oats", calories_per_100g: 379, protein_per_100g: 13, carbs_per_100g: 67, fat_per_100g: 7, serving_size: 80 },
+  { name: "Banana", calories_per_100g: 89, protein_per_100g: 1.1, carbs_per_100g: 23, fat_per_100g: 0.3, serving_size: 120 },
+  { name: "Skyr", calories_per_100g: 63, protein_per_100g: 11, carbs_per_100g: 4, fat_per_100g: 0.2, serving_size: 200 },
+  { name: "Magerquark", calories_per_100g: 67, protein_per_100g: 12, carbs_per_100g: 4, fat_per_100g: 0.3, serving_size: 250 },
+  { name: "Greek yogurt", calories_per_100g: 97, protein_per_100g: 9, carbs_per_100g: 4, fat_per_100g: 5, serving_size: 150 },
+  { name: "Tuna (canned)", calories_per_100g: 116, protein_per_100g: 26, carbs_per_100g: 0, fat_per_100g: 1, serving_size: 100 },
+  { name: "Pasta (cooked)", calories_per_100g: 158, protein_per_100g: 6, carbs_per_100g: 31, fat_per_100g: 0.9, serving_size: 150 },
+  { name: "Milk", calories_per_100g: 60, protein_per_100g: 3.3, carbs_per_100g: 5, fat_per_100g: 3.3, serving_size: 200 },
+];
+
+// ---- Goals ----
+export async function loadGoals(userId) {
+  const { data } = await supabase.from("nutrition_goals").select("*").eq("user_id", userId).maybeSingle();
+  return data || null;
+}
+export async function saveGoals(userId, g) {
+  return supabase.from("nutrition_goals")
+    .upsert({ user_id: userId, ...g, updated_at: new Date().toISOString() }, { onConflict: "user_id" })
+    .select().single();
+}
+
+// ---- Foods ----
+export async function addFood(food) { return supabase.from("foods").insert(food).select().single(); }
+export async function searchFoods(userId, q) {
+  let query = supabase.from("foods").select("*").or(`user_id.eq.${userId},user_id.is.null`);
+  if (q && q.trim()) query = query.ilike("name", "%" + q.trim() + "%");
+  const { data } = await query.order("created_at", { ascending: false }).limit(40);
+  return data || [];
+}
+export async function recentFoods(userId, n = 12) {
+  const { data } = await supabase.from("food_logs").select("food_id, created_at")
+    .eq("user_id", userId).not("food_id", "is", null).order("created_at", { ascending: false }).limit(60);
+  const ids = [];
+  const seen = new Set();
+  (data || []).forEach((l) => { if (l.food_id && !seen.has(l.food_id)) { seen.add(l.food_id); ids.push(l.food_id); } });
+  if (!ids.length) return [];
+  const { data: foods } = await supabase.from("foods").select("*").in("id", ids.slice(0, n));
+  const map = {}; (foods || []).forEach((f) => (map[f.id] = f));
+  return ids.slice(0, n).map((id) => map[id]).filter(Boolean);
+}
+
+// ---- Logs ----
+export async function loadLogs(userId, date) {
+  const { data } = await supabase.from("food_logs").select("*").eq("user_id", userId).eq("log_date", date).order("created_at", { ascending: true });
+  return data || [];
+}
+export async function logFood(entry) { return supabase.from("food_logs").insert(entry).select().single(); }
+export async function removeLog(id) { return supabase.from("food_logs").delete().eq("id", id); }
+
+// ---- Calc ----
+export function macrosFor(food, grams) {
+  const f = grams / 100;
+  const r = (v) => (v == null || v === "" ? null : Math.round(Number(v) * f * 10) / 10);
+  return {
+    calories: Math.round(Number(food.calories_per_100g || 0) * f),
+    protein: r(food.protein_per_100g), carbs: r(food.carbs_per_100g), fat: r(food.fat_per_100g),
+    sugar: r(food.sugar_per_100g), salt: r(food.salt_per_100g), fiber: r(food.fiber_per_100g),
+  };
+}
+export function dayTotals(logs) {
+  return logs.reduce((t, l) => ({
+    calories: t.calories + (Number(l.calculated_calories) || 0),
+    protein: t.protein + (Number(l.calculated_protein) || 0),
+    carbs: t.carbs + (Number(l.calculated_carbs) || 0),
+    fat: t.fat + (Number(l.calculated_fat) || 0),
+  }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+}
+
+// ---- Open Food Facts (barcode lookup; works for EU/German products) ----
+export async function lookupBarcode(barcode) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const url = "https://world.openfoodfacts.org/api/v2/product/" + encodeURIComponent(barcode) +
+      ".json?fields=product_name,brands,image_front_small_url,nutriments,serving_quantity,serving_size";
+    const res = await fetch(url, { signal: ctrl.signal });
+    const j = await res.json();
+    if (!j || j.status !== 1 || !j.product) return null;
+    const p = j.product, n = p.nutriments || {};
+    const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] ? Math.round(n["energy_100g"] / 4.184) : null);
+    return {
+      source: "off", barcode,
+      name: p.product_name || "Unknown product",
+      brand: (p.brands || "").split(",")[0] || null,
+      image_url: p.image_front_small_url || null,
+      calories_per_100g: kcal,
+      protein_per_100g: n.proteins_100g ?? null,
+      carbs_per_100g: n.carbohydrates_100g ?? null,
+      fat_per_100g: n.fat_100g ?? null,
+      sugar_per_100g: n.sugars_100g ?? null,
+      salt_per_100g: n.salt_100g ?? null,
+      fiber_per_100g: n.fiber_100g ?? null,
+      serving_quantity: p.serving_quantity ? Number(p.serving_quantity) : null,
+      serving_size: p.serving_quantity ? Number(p.serving_quantity) : null,
+    };
+  } catch { return null; } finally { clearTimeout(t); }
+}

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight } from "lucide-react";
+import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft } from "lucide-react";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
 import { currentStreak, consistencyScore, toISO } from "../lib/streak.js";
@@ -13,6 +14,7 @@ import { pushSupported, isStandalone, pushStatus, enablePush, disablePush, sendT
 const GOALS = ["Lose fat", "Build muscle", "Recomp", "Stay consistent", "Get stronger", "Run more"];
 
 export default function Profile() {
+  const navigate = useNavigate();
   const { user, profile, activeChallenge, refresh, signOut } = useAuth();
   const [form, setForm] = useState({ name: "", height_cm: "", start_weight_kg: "", current_weight_kg: "", weekly_goal: 4, goals: [] });
   const [prs, setPrs] = useState([]);
@@ -96,6 +98,7 @@ export default function Profile() {
 
   return (
     <div className="screen animate-screen space-y-4">
+      <button onClick={() => navigate("/")} className="pill mt-1 flex w-fit items-center gap-1"><ChevronLeft size={14} /> Arena</button>
       <div className="card grain overflow-hidden">
         <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full opacity-25" style={{ background: "var(--grad-gold)", filter: "blur(30px)" }} />
         <div className="flex items-center gap-4">

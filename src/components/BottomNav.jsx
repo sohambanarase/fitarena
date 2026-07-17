@@ -1,12 +1,12 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Swords, Target, Flame, BookOpen, User } from "lucide-react";
+import { Swords, Target, Flame, BookOpen, Apple } from "lucide-react";
 
 const tabs = [
   { to: "/", label: "Arena", Icon: Swords, end: true },
   { to: "/grind", label: "Grind", Icon: Target },
   { to: "/coach", label: "Coach", Icon: Flame },
   { to: "/playbook", label: "Playbook", Icon: BookOpen },
-  { to: "/profile", label: "Profile", Icon: User },
+  { to: "/count", label: "Count", Icon: Apple },
 ];
 
 // Floating "island" nav: detached glass capsule with a liquid sliding

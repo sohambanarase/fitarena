@@ -449,3 +449,38 @@ subtle grain texture, applied selectively: glass for floating chrome, solid pane
 - **Fixed cross-account notifications.** If you enabled notifications as one account then switched to
   another on the same device, the device kept getting the first account's challenge notifications.
   The device's subscription now auto-reassigns to whoever is logged in (on app open).
+
+---
+
+## v11 — Count (nutrition) foundation + plan chooser
+
+**Database step:** run `supabase/migration_v11.sql` (nutrition tables). Then push.
+No image blobs are stored — only text/number data (image_url is just a URL string from Open Food Facts).
+
+### Navigation
+- The navbar's **Profile** slot is now **Count**. Profile moved to the **avatar** in the top-left of
+  the Arena screen (tap it), and Profile has a back button.
+
+### Plan chooser (Grind)
+- Starting a plan no longer auto-runs exercises in order. It opens a **chooser**: tap whichever
+  exercise you want, and ones already logged today show a ✓ and are dimmed. Finishing one returns to
+  the chooser, so you can leave and come back and it knows what's done.
+
+### Count — what works now
+- **Dashboard**: calorie ring with "kcal left", **protein prioritized** (big mint bar with "Xg to
+  go"), carbs/fat bars. Empty states.
+- **Daily goals**: calories, protein, carbs, fat + goal type (lose/maintain/build).
+- **The draggable gram scale**: drag to set grams, tap the number to type it, ± and quick buttons,
+  live macro recalculation.
+- **Add food** via: Search (your foods + recent), Quick add (gym staples), Add/Create manually
+  (per-100g), Barcode → Open Food Facts lookup (manual entry), and **AI estimate** (describe a meal,
+  Gemini returns editable macros — needs `GEMINI_API_KEY`, already set).
+- **Review**: per-100g values (editable) → scale → live serving macros → pick meal → log.
+- **Diary**: six meal sections with per-meal kcal/protein totals, delete items.
+
+### TODO — next steps (foundation is in place / hooks ready)
+- **Live camera barcode scanning** (Barcode view currently takes manual entry; add a scanner lib + camera permission).
+- **AI photo/label scan** (snap a nutrition label → macros) and **AI goal assistant** (chat to set goals).
+- **Saved meals** (tables + RLS already exist) and **favorites UI** (table exists).
+- **Insights** (weekly protein/calorie trends) and **date navigation** on Count (currently today only).
+- **Search other users' public food DB / larger Open Food Facts search** (name search, not just barcode).
