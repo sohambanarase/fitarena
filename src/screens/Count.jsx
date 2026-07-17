@@ -5,12 +5,14 @@ import ScreenHeader from "../components/ScreenHeader.jsx";
 import Sheet from "../components/Sheet.jsx";
 import Loader from "../components/Loader.jsx";
 import QuantityScale from "../components/QuantityScale.jsx";
+import CameraScanner from "../components/CameraScanner.jsx";
 import {
   MEALS, MEAL_LABELS, QUICK_FOODS,
   loadGoals, saveGoals, addFood, searchFoods, recentFoods,
   loadLogs, logFood, removeLog, macrosFor, dayTotals, lookupBarcode,
+  loadSavedMeals, createSavedMeal, deleteSavedMeal, logSavedMeal, savedMealTotals,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 
@@ -72,7 +74,7 @@ export default function Count() {
     { key: "manual", label: "Add food", Icon: PencilLine },
     { key: "quick", label: "Quick add", Icon: Zap },
     { key: "ai", label: "Use AI", Icon: Sparkles },
-    { key: "custom", label: "Custom", Icon: Apple },
+    { key: "saved", label: "Saved", Icon: Bookmark },
   ];
 
   return (
@@ -214,7 +216,7 @@ function AddFoodSheet({ userId, date, initial, onClose, onLogged }) {
       {view === "search" && <SearchView userId={userId} onPick={openReview} />}
       {view === "quick" && <QuickView onPick={openReview} />}
       {view === "manual" && <ManualView userId={userId} save onPick={openReview} />}
-      {view === "custom" && <ManualView userId={userId} save onPick={openReview} />}
+      {view === "saved" && <SavedMealsView userId={userId} date={date} meal={meal} setMeal={setMeal} onLogged={() => { onLogged(); onClose(); }} />}
       {view === "barcode" && <BarcodeView onPick={openReview} />}
       {view === "ai" && <AIView userId={userId} onLog={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} meal={meal} setMeal={setMeal} />}
       {view === "review" && review && (
@@ -225,13 +227,13 @@ function AddFoodSheet({ userId, date, initial, onClose, onLogged }) {
   );
 }
 function titleFor(v) {
-  return { home: "Add food", search: "Search food", quick: "Quick add", manual: "Add food", custom: "Custom food", barcode: "Scan barcode", ai: "AI estimate", review: "Review" }[v] || "Add food";
+  return { home: "Add food", search: "Search food", quick: "Quick add", manual: "Add food", saved: "Saved meals", barcode: "Scan barcode", ai: "AI estimate", review: "Review" }[v] || "Add food";
 }
 function HomeChooser({ onPick }) {
   const opts = [
     ["barcode", "Scan barcode", ScanLine], ["search", "Search food", Search],
     ["manual", "Add manually", PencilLine], ["quick", "Quick add", Zap],
-    ["ai", "Use AI", Sparkles], ["custom", "Create custom food", Apple],
+    ["ai", "Use AI", Sparkles], ["saved", "Saved meals", Bookmark],
   ];
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -317,23 +319,24 @@ function BarcodeView({ onPick }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  async function lookup() {
-    setBusy(true); setErr(null);
-    const food = await lookupBarcode(code.trim());
+  const [scanning, setScanning] = useState(false);
+  async function lookup(bc) {
+    const c = (bc || code).trim();
+    if (!c) return;
+    setScanning(false); setBusy(true); setErr(null);
+    const food = await lookupBarcode(c);
     setBusy(false);
     if (!food) { setErr("We couldn't find this product. Add it manually, use AI, or search food."); return; }
     onPick(food);
   }
+  if (scanning) return <CameraScanner onDetected={(bc) => { setCode(bc); lookup(bc); }} onClose={() => setScanning(false)} />;
   return (
     <div className="space-y-3">
-      {/* Camera scanning is a next step (needs a scanner lib + camera permission). Manual entry works now. */}
-      <div className="panel flex items-center gap-3">
-        <Camera size={20} className="text-muted" />
-        <p className="text-sm text-muted">Live camera scanning is coming next. For now, type or paste the barcode below — it looks the product up on Open Food Facts (great for EU/German products).</p>
-      </div>
-      <div className="search-glass"><Barcode size={18} className="text-muted" /><input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter barcode number" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+      <button onClick={() => setScanning(true)} className="btn-primary flex w-full items-center justify-center gap-2 py-4 text-base"><Camera size={18} /> Scan with camera</button>
+      <p className="text-center text-[11px] text-muted">Great for EU/German products (Open Food Facts). Or enter the barcode manually below — also works if the camera is blocked.</p>
+      <div className="search-glass"><Barcode size={18} className="text-muted" /><input inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter barcode number" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
       {err && <p className="text-sm text-ember">{err}</p>}
-      <button className="btn-primary w-full" disabled={!code.trim() || busy} onClick={lookup}>{busy ? "Looking up…" : "Look up product"}</button>
+      <button className="btn-primary w-full" disabled={!code.trim() || busy} onClick={() => lookup()}>{busy ? "Looking up…" : "Look up product"}</button>
     </div>
   );
 }
@@ -442,6 +445,110 @@ function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
         calculated_calories: m.calories, calculated_protein: m.protein, calculated_carbs: m.carbs, calculated_fat: m.fat,
         calculated_sugar: m.sugar, calculated_salt: m.salt, calculated_fiber: m.fiber,
       })}>Add to {MEAL_LABELS[meal]}</button>
+    </div>
+  );
+}
+
+/* ---------- Saved meals ---------- */
+function SavedMealsView({ userId, date, meal, setMeal, onLogged }) {
+  const [meals, setMeals] = useState(null);
+  const [mode, setMode] = useState("list");
+  const reload = () => loadSavedMeals(userId).then(setMeals);
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+
+  if (mode === "create") return <CreateSavedMeal userId={userId} onDone={() => { setMode("list"); reload(); }} onCancel={() => setMode("list")} />;
+
+  return (
+    <div className="space-y-3">
+      <button onClick={() => setMode("create")} className="pill flex w-full items-center justify-center gap-1 py-2.5"><BookmarkPlus size={14} /> Create a saved meal</button>
+      {meals === null ? <Loader label="Loading…" /> : meals.length === 0 ? (
+        <p className="text-sm text-muted">No saved meals yet. Build a combo (e.g. "Post-workout: shake + banana") and log the whole thing in one tap next time.</p>
+      ) : (
+        <>
+          <p className="eyebrow">Log to</p>
+          <MealPicker meal={meal} setMeal={setMeal} />
+          <div className="space-y-2">
+            {meals.map((m) => {
+              const t = savedMealTotals(m);
+              return (
+                <div key={m.id} className="panel flex items-center gap-2 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold">{m.meal_name}</p>
+                    <p className="text-[11px] text-muted">{m.items.length} item{m.items.length !== 1 ? "s" : ""} · {Math.round(t.cal)} kcal · {Math.round(t.p)}g P</p>
+                  </div>
+                  <button onClick={async () => { await logSavedMeal(userId, date, meal, m); onLogged(); }} className="btn-primary px-3 py-2 text-sm">Log</button>
+                  <button onClick={async () => { await deleteSavedMeal(m.id); reload(); }} className="text-muted active:scale-90 hover:text-ember"><Trash2 size={16} /></button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CreateSavedMeal({ userId, onDone, onCancel }) {
+  const [name, setName] = useState("");
+  const [items, setItems] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function addItem(food) {
+    let f = food;
+    if (!f.id) {
+      const { data } = await addFood({ user_id: userId, source: food.source || "custom", name: food.name, calories_per_100g: food.calories_per_100g, protein_per_100g: food.protein_per_100g, carbs_per_100g: food.carbs_per_100g, fat_per_100g: food.fat_per_100g, serving_size: food.serving_size });
+      f = data || food;
+    }
+    setItems((prev) => [...prev, { food: f, grams: f.serving_size ? Number(f.serving_size) : 100 }]);
+    setAdding(false);
+  }
+
+  if (adding) return (
+    <div className="space-y-2">
+      <button onClick={() => setAdding(false)} className="pill">← Back</button>
+      <FoodPickerInline userId={userId} onPick={addItem} />
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <button onClick={onCancel} className="pill">← Saved meals</button>
+      <input className="inp" placeholder="Meal name (e.g. Post-workout)" value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="space-y-2">
+        {items.map((it, i) => (
+          <div key={i} className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm font-bold capitalize">{it.food.name}</span>
+            <input className="w-16 rounded-lg bg-surface px-2 py-1.5 text-center text-paper outline-none" inputMode="decimal" value={it.grams}
+              onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, grams: Number(e.target.value) || 0 } : x)))} />
+            <span className="text-[11px] text-muted">g</span>
+            <button onClick={() => setItems(items.filter((_, j) => j !== i))} className="text-muted"><X size={16} /></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={() => setAdding(true)} className="pill flex w-full items-center justify-center gap-1 py-2.5"><Plus size={14} /> Add food</button>
+      <button className="btn-primary w-full" disabled={busy || !name.trim() || items.length === 0}
+        onClick={async () => { setBusy(true); await createSavedMeal(userId, name.trim(), items.map((it) => ({ food_id: it.food.id, grams: it.grams }))); setBusy(false); onDone(); }}>
+        {busy ? "Saving…" : "Save meal"}
+      </button>
+    </div>
+  );
+}
+
+function FoodPickerInline({ userId, onPick }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [recent, setRecent] = useState([]);
+  useEffect(() => { recentFoods(userId).then(setRecent); }, [userId]);
+  useEffect(() => { const t = setTimeout(() => searchFoods(userId, q).then(setResults), 250); return () => clearTimeout(t); }, [q, userId]);
+  const list = q.trim() ? results : recent;
+  return (
+    <div className="space-y-2">
+      <div className="search-glass"><Search size={18} className="text-muted" /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+      <div className="max-h-[42vh] space-y-1.5 overflow-y-auto">
+        {list.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
+        {!q.trim() && <><p className="eyebrow pt-1">Gym staples</p>{QUICK_FOODS.map((f, i) => <FoodRow key={"q" + i} food={f} onClick={() => onPick({ ...f, source: "quickadd" })} />)}</>}
+      </div>
     </div>
   );
 }

@@ -484,3 +484,17 @@ No image blobs are stored — only text/number data (image_url is just a URL str
 - **Saved meals** (tables + RLS already exist) and **favorites UI** (table exists).
 - **Insights** (weekly protein/calorie trends) and **date navigation** on Count (currently today only).
 - **Search other users' public food DB / larger Open Food Facts search** (name search, not just barcode).
+
+---
+
+## v11.1 — saved meals + live camera barcode scanner
+
+No new migration (uses the v11 tables). Just push.
+
+- **Saved meals**: in Count, the "Saved" quick action (and "Saved meals" in the add menu) lets you
+  build a combo — name it, add foods with grams — and then log the whole thing to any meal in one tap.
+  Delete saved meals you don't want.
+- **Live camera barcode scanning**: "Scan barcode → Scan with camera" opens the camera and reads
+  EAN/UPC barcodes (works on iOS and Android via ZXing), then looks the product up on Open Food Facts
+  and drops you into the review screen with the gram scale. If the camera is blocked or unavailable,
+  it falls back to manual barcode entry — the flow never breaks.

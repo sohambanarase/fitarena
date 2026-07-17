@@ -109,3 +109,44 @@ export async function lookupBarcode(barcode) {
     };
   } catch { return null; } finally { clearTimeout(t); }
 }
+
+// ---- Saved meals (templates) ----
+export async function loadSavedMeals(userId) {
+  const { data: meals } = await supabase.from("saved_meals").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  if (!meals || !meals.length) return [];
+  const ids = meals.map((m) => m.id);
+  const { data: items } = await supabase.from("saved_meal_items").select("*").in("saved_meal_id", ids);
+  const foodIds = [...new Set((items || []).map((it) => it.food_id).filter(Boolean))];
+  const foodMap = {};
+  if (foodIds.length) { const { data: foods } = await supabase.from("foods").select("*").in("id", foodIds); (foods || []).forEach((f) => (foodMap[f.id] = f)); }
+  const byMeal = {};
+  (items || []).forEach((it) => (byMeal[it.saved_meal_id] || (byMeal[it.saved_meal_id] = [])).push({ ...it, food: foodMap[it.food_id] }));
+  return meals.map((m) => ({ ...m, items: byMeal[m.id] || [] }));
+}
+export async function createSavedMeal(userId, name, items) {
+  const { data: meal } = await supabase.from("saved_meals").insert({ user_id: userId, meal_name: name }).select().single();
+  if (!meal) return null;
+  const rows = items.map((it) => ({ saved_meal_id: meal.id, food_id: it.food_id, quantity: it.grams, quantity_unit: "g", quantity_grams: it.grams }));
+  if (rows.length) await supabase.from("saved_meal_items").insert(rows);
+  return meal;
+}
+export async function deleteSavedMeal(id) { return supabase.from("saved_meals").delete().eq("id", id); }
+export async function logSavedMeal(userId, date, mealType, savedMeal) {
+  const rows = (savedMeal.items || []).filter((it) => it.food).map((it) => {
+    const m = macrosFor(it.food, it.quantity_grams || 100);
+    return {
+      user_id: userId, food_id: it.food_id, name: it.food.name, log_date: date, meal_type: mealType,
+      quantity: it.quantity_grams, quantity_unit: "g", quantity_grams: it.quantity_grams,
+      calculated_calories: m.calories, calculated_protein: m.protein, calculated_carbs: m.carbs, calculated_fat: m.fat,
+      calculated_sugar: m.sugar, calculated_salt: m.salt, calculated_fiber: m.fiber,
+    };
+  });
+  if (rows.length) return supabase.from("food_logs").insert(rows);
+}
+export function savedMealTotals(savedMeal) {
+  return (savedMeal.items || []).reduce((t, it) => {
+    if (!it.food) return t;
+    const m = macrosFor(it.food, it.quantity_grams || 100);
+    return { cal: t.cal + (m.calories || 0), p: t.p + (m.protein || 0) };
+  }, { cal: 0, p: 0 });
+}
