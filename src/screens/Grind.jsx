@@ -422,8 +422,8 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, startSession,
   useEffect(() => { if (!restSince) return; const t = setInterval(() => setRestNow(Date.now()), 1000); return () => clearInterval(t); }, [restSince]);
   const restSecs = restSince ? Math.floor((restNow - restSince) / 1000) : 0;
 
-  const enterEntry = useCallback((exObj, setCount, tgt) => {
-    setEx(exObj); setCount(Math.max(1, setCount || 3)); setTarget(tgt || null);
+  const enterEntry = useCallback((exObj, nSets, tgt) => {
+    setEx(exObj); setCount(Math.max(1, nSets || 3)); setTarget(tgt || null);
     setSets([]); setCur(0); setRestSince(null);
     setW(tgt && tgt.weight != null && tgt.weight !== "" ? String(tgt.weight) : "");
     setR(tgt && tgt.reps != null && tgt.reps !== "" ? String(tgt.reps) : "");

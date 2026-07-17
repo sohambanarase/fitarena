@@ -72,3 +72,20 @@ export async function sendTestPush(userId) {
   if (!res.ok) throw new Error(j.error || "Test failed.");
   return j;
 }
+
+// Re-assign this device's existing push subscription to the current user.
+// Fixes account-switching: if you enabled push as user A then log in as user B on
+// the same device, B (not A) now owns the device's notifications.
+export async function reconcilePush(userId) {
+  if (!pushSupported() || !userId) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    const json = sub.toJSON();
+    await supabase.from("push_subscriptions").upsert(
+      { user_id: userId, endpoint: json.endpoint, subscription: json },
+      { onConflict: "endpoint" }
+    );
+  } catch {}
+}

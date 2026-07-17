@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase.js";
+import { reconcilePush } from "../lib/push.js";
 
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
@@ -15,6 +16,7 @@ export function AuthProvider({ children }) {
   const hydrate = useCallback(async (u) => {
     const uid = u?.id;
     if (!uid) { setProfile(null); setChallenges([]); return; }
+    reconcilePush(uid); // make this device's notifications follow the logged-in account
 
     // 1) profile — self-heal if it's missing (e.g. signed up before setup, or trigger missed)
     let { data: p } = await supabase.from("profiles").select("*").eq("id", uid).single();

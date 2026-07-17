@@ -438,3 +438,14 @@ subtle grain texture, applied selectively: glass for floating chrome, solid pane
   (consistency %, sets this week vs last, gym-day trend, PR bests) and gives numbers-based suggestions.
 - **Invites include the app link.** Sharing a code now sends the join code *and* your app link, and
   the sheet shows a tappable link.
+
+---
+
+## v10.1 fixes
+
+- **Fixed Grind crash** (blank screen on plan start / stuck on the set-count step). A parameter was
+  shadowing the set-count state setter, crashing the set-entry screen. Now plan-start and normal
+  logging both open the editable set entry correctly.
+- **Fixed cross-account notifications.** If you enabled notifications as one account then switched to
+  another on the same device, the device kept getting the first account's challenge notifications.
+  The device's subscription now auto-reassigns to whoever is logged in (on app open).
