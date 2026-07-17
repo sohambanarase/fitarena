@@ -11,8 +11,9 @@ import {
   loadGoals, saveGoals, addFood, searchFoods, recentFoods,
   loadLogs, logFood, removeLog, macrosFor, dayTotals, lookupBarcode,
   loadSavedMeals, createSavedMeal, deleteSavedMeal, logSavedMeal, savedMealTotals,
+  searchOFF, cacheOffFood, loadFavorites, isFavorite, setFavorite, ensureFood, loadRange, weeklyInsights,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 
@@ -45,17 +46,23 @@ function MacroBar({ label, value, goal, color, star }) {
 
 export default function Count() {
   const { user } = useAuth();
-  const date = toISO(new Date());
+  const today = toISO(new Date());
+  const [date, setDate] = useState(today);
   const [goals, setGoals] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showGoals, setShowGoals] = useState(false);
   const [add, setAdd] = useState(null); // { view, meal }
+  const isToday = date === today;
+  const shiftDay = (d) => setDate(toISO(new Date(new Date(date + "T00:00:00").getTime() + d * 86400000)));
+  const dayLabel = isToday ? "Today" : new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [g, l] = await Promise.all([loadGoals(user.id), loadLogs(user.id, date)]);
-    setGoals(g); setLogs(l); setLoading(false);
+    const since = toISO(new Date(Date.now() - 6 * 86400000));
+    const [g, l, range] = await Promise.all([loadGoals(user.id), loadLogs(user.id, date), loadRange(user.id, since)]);
+    setGoals(g); setLogs(l); setInsights(weeklyInsights(range, g)); setLoading(false);
   }, [user.id, date]);
   useEffect(() => { load(); }, [load]);
 
@@ -82,6 +89,12 @@ export default function Count() {
       <ScreenHeader eyebrow="Nutrition" title="Count" right={
         <button onClick={() => setShowGoals(true)} className="grid h-9 w-9 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Settings size={18} /></button>
       } />
+
+      <div className="flex items-center justify-between rounded-full bg-surface2 px-2 py-1.5">
+        <button onClick={() => shiftDay(-1)} className="grid h-8 w-8 place-items-center rounded-full active:scale-90"><ChevronLeft size={18} /></button>
+        <span className="text-sm font-bold">{dayLabel}</span>
+        <button onClick={() => shiftDay(1)} disabled={isToday} className="grid h-8 w-8 place-items-center rounded-full active:scale-90 disabled:opacity-30"><ChevronRight size={18} /></button>
+      </div>
 
       {loading ? <Loader label="Loading your day…" /> : (
         <>
@@ -154,11 +167,27 @@ export default function Count() {
               );
             })}
           </div>
+
+          {insights && insights.daysLogged > 0 && (
+            <div className="card">
+              <p className="eyebrow mb-2 flex items-center gap-1 text-gold"><TrendingUp size={13} /> This week</p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div><p className="font-score text-lg font-bold">{insights.avgCal}</p><p className="text-[10px] text-muted">avg kcal</p></div>
+                <div><p className="font-score text-lg font-bold text-mint">{insights.avgProtein}</p><p className="text-[10px] text-muted">avg protein</p></div>
+                <div><p className="font-score text-lg font-bold">{insights.daysLogged}</p><p className="text-[10px] text-muted">days logged</p></div>
+              </div>
+              <div className="mt-2 space-y-1 text-[12px] text-muted">
+                {insights.proteinHit != null && <p>You hit your protein goal <span className="font-bold text-mint">{insights.proteinHit}/{insights.daysLogged}</span> day{insights.daysLogged !== 1 ? "s" : ""} logged.</p>}
+                {goals?.protein_goal && isToday && t.protein < goals.protein_goal && <p>You still need <span className="font-bold text-mint">{Math.round(goals.protein_goal - t.protein)}g</span> protein today.</p>}
+              </div>
+              <button onClick={() => setAdd({ view: "ai", meal: "snacks", aiMode: "assist" })} className="pill mt-3 flex w-full items-center justify-center gap-1 py-2"><MessageCircle size={13} /> Ask the AI coach</button>
+            </div>
+          )}
         </>
       )}
 
       {showGoals && <GoalsSheet userId={user.id} goals={goals} onClose={() => setShowGoals(false)} onSaved={load} />}
-      {add && <AddFoodSheet userId={user.id} date={date} initial={add} onClose={() => setAdd(null)} onLogged={load} />}
+      {add && <AddFoodSheet userId={user.id} date={date} initial={add} goals={goals} totals={t} onClose={() => setAdd(null)} onLogged={load} />}
     </div>
   );
 }
@@ -203,12 +232,12 @@ function Field({ label, value, onChange }) {
 }
 
 /* ---------- Add food (search / manual / barcode / quick / ai) → review ---------- */
-function AddFoodSheet({ userId, date, initial, onClose, onLogged }) {
+function AddFoodSheet({ userId, date, initial, goals, totals, onClose, onLogged }) {
   const [view, setView] = useState(initial.view === "home" ? "home" : initial.view);
   const [meal, setMeal] = useState(initial.meal || "snacks");
   const [review, setReview] = useState(null); // food object to review
 
-  const openReview = (food) => { setReview(food); setView("review"); };
+  const openReview = async (food) => { let f = food; if (food.source === "off" && !food.id) f = await cacheOffFood(food); setReview(f); setView("review"); };
 
   return (
     <Sheet title={review ? review.name : titleFor(view)} onClose={onClose}>
@@ -218,7 +247,7 @@ function AddFoodSheet({ userId, date, initial, onClose, onLogged }) {
       {view === "manual" && <ManualView userId={userId} save onPick={openReview} />}
       {view === "saved" && <SavedMealsView userId={userId} date={date} meal={meal} setMeal={setMeal} onLogged={() => { onLogged(); onClose(); }} />}
       {view === "barcode" && <BarcodeView onPick={openReview} />}
-      {view === "ai" && <AIView userId={userId} onLog={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} meal={meal} setMeal={setMeal} />}
+      {view === "ai" && <AIView userId={userId} initialMode={initial.aiMode} goals={goals} totals={totals} openReview={openReview} onLog={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} meal={meal} setMeal={setMeal} />}
       {view === "review" && review && (
         <ReviewFood food={review} meal={meal} setMeal={setMeal} userId={userId}
           onAdd={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} />
@@ -248,19 +277,43 @@ function HomeChooser({ onPick }) {
 
 function SearchView({ userId, onPick }) {
   const [q, setQ] = useState("");
-  const [results, setResults] = useState([]);
+  const [local, setLocal] = useState([]);
+  const [off, setOff] = useState([]);
   const [recent, setRecent] = useState([]);
-  useEffect(() => { recentFoods(userId).then(setRecent); }, [userId]);
-  useEffect(() => { const t = setTimeout(() => searchFoods(userId, q).then(setResults), 250); return () => clearTimeout(t); }, [q, userId]);
-  const list = q.trim() ? results : recent;
+  const [favs, setFavs] = useState([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => { recentFoods(userId).then(setRecent); loadFavorites(userId).then(setFavs); }, [userId]);
+  useEffect(() => {
+    if (!q.trim()) { setLocal([]); setOff([]); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      const [l, o] = await Promise.all([searchFoods(userId, q), searchOFF(q)]);
+      const have = new Set(l.map((f) => f.barcode).filter(Boolean));
+      setLocal(l); setOff(o.filter((f) => !f.barcode || !have.has(f.barcode)).slice(0, 15));
+      setSearching(false);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [q, userId]);
+
   return (
     <div className="space-y-2">
-      <div className="search-glass"><Search size={18} className="text-muted" /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
-      {!q.trim() && recent.length > 0 && <p className="eyebrow">Recent</p>}
-      <div className="max-h-[50vh] space-y-1.5 overflow-y-auto">
-        {list.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
-        {list.length === 0 && <p className="px-1 text-sm text-muted">{q.trim() ? "No match. Add it manually or via AI." : "No foods yet — add one below."}</p>}
-      </div>
+      <div className="search-glass"><Search size={18} className="text-muted" /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search foods, scanned items, or Open Food Facts" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+      {!q.trim() ? (
+        <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
+          {favs.length > 0 && <><p className="eyebrow flex items-center gap-1"><Star size={11} className="text-gold" /> Favorites</p>{favs.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}</>}
+          {recent.length > 0 && <><p className="eyebrow pt-1">Recent</p>{recent.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}</>}
+          {favs.length === 0 && recent.length === 0 && <p className="px-1 text-sm text-muted">Search your foods, scanned products, or the Open Food Facts database (e.g. "starbucks latte").</p>}
+        </div>
+      ) : (
+        <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
+          {local.length > 0 && <p className="eyebrow">Your foods</p>}
+          {local.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
+          {off.length > 0 && <p className="eyebrow pt-1">Open Food Facts</p>}
+          {off.map((f, i) => <FoodRow key={"off" + i} food={f} onClick={() => onPick(f)} />)}
+          {searching && <p className="px-1 text-sm text-muted">Searching…</p>}
+          {!searching && local.length === 0 && off.length === 0 && <p className="px-1 text-sm text-muted">No match. Add it manually or use AI.</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -319,46 +372,61 @@ function BarcodeView({ onPick }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [scanning, setScanning] = useState(false);
+  const [mode, setMode] = useState("scan"); // scan | manual
   async function lookup(bc) {
     const c = (bc || code).trim();
     if (!c) return;
-    setScanning(false); setBusy(true); setErr(null);
+    setMode("manual"); setBusy(true); setErr(null);
     const food = await lookupBarcode(c);
     setBusy(false);
     if (!food) { setErr("We couldn't find this product. Add it manually, use AI, or search food."); return; }
     onPick(food);
   }
-  if (scanning) return <CameraScanner onDetected={(bc) => { setCode(bc); lookup(bc); }} onClose={() => setScanning(false)} />;
+  if (mode === "scan") return <CameraScanner onDetected={(bc) => { setCode(bc); lookup(bc); }} onClose={() => setMode("manual")} />;
   return (
     <div className="space-y-3">
-      <button onClick={() => setScanning(true)} className="btn-primary flex w-full items-center justify-center gap-2 py-4 text-base"><Camera size={18} /> Scan with camera</button>
-      <p className="text-center text-[11px] text-muted">Great for EU/German products (Open Food Facts). Or enter the barcode manually below — also works if the camera is blocked.</p>
-      <div className="search-glass"><Barcode size={18} className="text-muted" /><input inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter barcode number" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+      <button onClick={() => { setErr(null); setMode("scan"); }} className="btn-primary flex w-full items-center justify-center gap-2 py-3"><Camera size={18} /> Scan with camera</button>
+      <p className="text-center text-[11px] text-muted">or enter the barcode manually (works if the camera is blocked)</p>
+      <div className="search-glass"><Barcode size={18} className="text-muted" /><input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter barcode number" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
       {err && <p className="text-sm text-ember">{err}</p>}
       <button className="btn-primary w-full" disabled={!code.trim() || busy} onClick={() => lookup()}>{busy ? "Looking up…" : "Look up product"}</button>
     </div>
   );
 }
 
-function AIView({ userId, onLog, meal, setMeal }) {
+function AIView({ userId, initialMode, goals, totals, openReview, onLog, meal, setMeal }) {
+  const [mode, setMode] = useState(initialMode || "describe");
+  const tabs = [["describe", "Describe meal"], ["label", "Scan label"], ["assist", "Ask coach"]];
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1.5">
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setMode(k)} className={"pill flex-1 py-2 " + (mode === k ? "pill-on" : "")}>{l}</button>)}
+      </div>
+      {mode === "describe" && <AIDescribe onLog={onLog} meal={meal} setMeal={setMeal} />}
+      {mode === "label" && <AILabel openReview={openReview} />}
+      {mode === "assist" && <AIAssist goals={goals} totals={totals} />}
+    </div>
+  );
+}
+
+function AIDescribe({ onLog, meal, setMeal }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [est, setEst] = useState(null); // {calories,protein,carbs,fat}
+  const [est, setEst] = useState(null);
   const [err, setErr] = useState(null);
   async function estimate() {
     setBusy(true); setErr(null);
     try {
-      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meal: text }) });
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "estimate", meal: text }) });
       const j = await res.json();
-      if (!res.ok || !j.ok) { setErr(j.error || "Couldn't estimate. Try rephrasing."); }
+      if (!res.ok || !j.ok) setErr(j.error || "Couldn't estimate. Try rephrasing.");
       else setEst({ calories: j.calories, protein: j.protein, carbs: j.carbs, fat: j.fat });
     } catch { setErr("AI is offline right now."); }
     setBusy(false);
   }
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted">Describe your meal, e.g. “200g cooked rice, 150g chicken breast, 1 spoon olive oil”. AI estimates the macros — you can edit before saving.</p>
+      <p className="text-sm text-muted">Describe your meal, e.g. "200g cooked rice, 150g chicken breast, 1 spoon olive oil". You can edit the estimate before saving.</p>
       <textarea className="inp min-h-[90px]" value={text} onChange={(e) => setText(e.target.value)} placeholder="Describe what you ate…" />
       {err && <p className="text-sm text-ember">{err}</p>}
       {!est ? (
@@ -383,6 +451,66 @@ function AIView({ userId, onLog, meal, setMeal }) {
   );
 }
 
+function AILabel({ openReview }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  async function onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setBusy(true); setErr(null);
+    try {
+      const b64 = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file); });
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "label", image: b64, mimeType: file.type || "image/jpeg" }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { setErr(j.error || "Couldn't read that label."); setBusy(false); return; }
+      openReview({ source: "ai", name: j.food.name || "Scanned food", ...j.food });
+    } catch { setErr("AI is offline right now."); }
+    setBusy(false);
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Take a clear, straight-on photo of the nutrition label. AI reads the per-100g values — you confirm and edit before saving.</p>
+      <label className="btn-primary flex w-full cursor-pointer items-center justify-center gap-2 py-4 text-base">
+        <ImageIcon size={18} /> {busy ? "Reading label…" : "Take / choose label photo"}
+        <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy} onChange={onFile} />
+      </label>
+      {err && <p className="text-sm text-ember">{err}</p>}
+    </div>
+  );
+}
+
+function AIAssist({ goals, totals }) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [answer, setAnswer] = useState(null);
+  const [err, setErr] = useState(null);
+  const prompts = ["How much protein do I still need today?", "Suggest a high-protein dinner under 700 calories.", "What should I eat after my workout?", "Build me a 2500 kcal muscle-gain day."];
+  async function ask(question) {
+    const text = (question || q).trim(); if (!text) return;
+    setBusy(true); setErr(null); setAnswer(null);
+    try {
+      const context = { calories: totals?.calories, protein: totals?.protein, carbs: totals?.carbs, fat: totals?.fat, caloriesGoal: goals?.calories_goal, proteinGoal: goals?.protein_goal };
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "assist", question: text, context }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) setErr(j.error || "Couldn't answer. Try rephrasing.");
+      else setAnswer(j.answer);
+    } catch { setErr("AI is offline right now."); }
+    setBusy(false);
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Ask about your day — the coach uses your goals and what you've logged so far.</p>
+      <div className="flex flex-wrap gap-1.5">
+        {prompts.map((pmt) => <button key={pmt} onClick={() => { setQ(pmt); ask(pmt); }} className="pill text-[11px]">{pmt}</button>)}
+      </div>
+      <textarea className="inp min-h-[70px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask anything about your nutrition today…" />
+      <button className="btn-primary w-full" disabled={!q.trim() || busy} onClick={() => ask()}>{busy ? "Thinking…" : "Ask the coach"}</button>
+      {err && <p className="text-sm text-ember">{err}</p>}
+      {answer && <div className="card whitespace-pre-wrap text-sm leading-relaxed">{answer}</div>}
+    </div>
+  );
+}
+
 function MealPicker({ meal, setMeal }) {
   return (
     <div>
@@ -398,13 +526,25 @@ function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
   const [f, setF] = useState({ ...food });
   const [grams, setGrams] = useState(food.serving_size ? Number(food.serving_size) : 100);
   const [edit, setEdit] = useState(false);
+  const [fav, setFav] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
   const m = macrosFor(f, grams);
   const setField = (k, v) => setF({ ...f, [k]: v });
+  useEffect(() => { if (food.id) isFavorite(userId, food.id).then(setFav); }, [food.id, userId]);
+  async function toggleFav() {
+    setFavBusy(true);
+    const saved = await ensureFood(userId, f);
+    if (saved && saved.id && !f.id) setF((x) => ({ ...x, id: saved.id }));
+    const id = (saved && saved.id) || f.id;
+    if (id) { await setFavorite(userId, id, !fav); setFav(!fav); }
+    setFavBusy(false);
+  }
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
         {f.image_url ? <img src={f.image_url} alt="" className="h-14 w-14 rounded-xl object-cover" /> : null}
-        <div className="min-w-0"><p className="truncate font-bold capitalize">{f.name}</p>{f.brand && <p className="text-[11px] text-muted">{f.brand}</p>}{f.barcode && <p className="text-[10px] text-muted">#{f.barcode}</p>}</div>
+        <div className="min-w-0 flex-1"><p className="truncate font-bold capitalize">{f.name}</p>{f.brand && <p className="text-[11px] text-muted">{f.brand}</p>}{f.barcode && <p className="text-[10px] text-muted">#{f.barcode}</p>}</div>
+        <button onClick={toggleFav} disabled={favBusy} aria-label="Favorite" className="shrink-0 active:scale-90"><Star size={22} className={fav ? "fill-gold text-gold" : "text-muted"} /></button>
       </div>
 
       <div className="panel">

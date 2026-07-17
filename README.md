@@ -498,3 +498,22 @@ No new migration (uses the v11 tables). Just push.
   EAN/UPC barcodes (works on iOS and Android via ZXing), then looks the product up on Open Food Facts
   and drops you into the review screen with the gram scale. If the camera is blocked or unavailable,
   it falls back to manual barcode entry — the flow never breaks.
+
+---
+
+## v11.2 — Count: AI label scan, AI coach, favorites, insights, date nav, OFF search
+
+No new migration (uses v11 tables). Push code. AI needs `GEMINI_API_KEY` (already set).
+
+- **Scan opens the camera immediately** now, with manual barcode entry as an option below (and the
+  automatic fallback if the camera is blocked).
+- **Search now covers scanned products + the Open Food Facts database by name** — so you can find
+  things without a barcode (e.g. "starbucks latte"). Scanned/looked-up products are cached so they're
+  searchable next time. Favorites and recent foods show when the search box is empty.
+- **Favorites**: a ★ on the review screen saves a food to favorites (and to your foods for reuse).
+- **AI (three modes)** under "Use AI": **Describe meal** (text → macros), **Scan label** (photo of a
+  nutrition label → per-100g values → review), and **Ask coach** (answers using your goals + what
+  you've logged today, e.g. "what should I eat after my workout?").
+- **Insights**: a "This week" card (avg kcal, avg protein, days logged, protein-goal hit rate, protein
+  still needed today) with a shortcut to the AI coach.
+- **Date navigation**: prev/next day arrows at the top of Count — review or back-fill any day.

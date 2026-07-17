@@ -1,5 +1,6 @@
-// /api/nutrition.js — estimate macros for a described meal via Gemini.
-// Returns whole-meal totals; the client shows them as an editable estimate.
+// /api/nutrition.js — Gemini-backed nutrition helper.
+// modes: "estimate" (meal text -> macros), "label" (label photo -> per-100g macros),
+//        "assist" (question + today's context -> short answer).
 const MODEL = "gemini-2.5-flash";
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent";
 
@@ -7,39 +8,85 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const key = process.env.GEMINI_API_KEY;
   if (!key) return res.status(500).json({ error: "GEMINI_API_KEY not configured." });
-
   const b = typeof req.body === "string" ? safeParse(req.body) : req.body || {};
-  const meal = (b.meal || "").toString().slice(0, 500).trim();
-  if (!meal) return res.status(400).json({ error: "No meal described." });
-
-  const prompt = [
-    "Estimate the total nutrition for this meal. Sum all items.",
-    "Return ONLY compact JSON, no markdown, no words: {\"calories\":<int kcal>,\"protein\":<int g>,\"carbs\":<int g>,\"fat\":<int g>}.",
-    "Use realistic values for the stated quantities. If quantities are vague, assume typical portions.",
-    "",
-    "MEAL: " + meal,
-  ].join("\n");
-
+  const mode = b.mode || "estimate";
   try {
-    const r = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 120, thinkingConfig: { thinkingBudget: 0 } } }),
-    });
-    if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
-    const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const parsed = safeParse(text.replace(/```json|```/g, "").trim());
-    if (!parsed || parsed.calories == null) return res.status(200).json({ ok: false, error: "Couldn't estimate that. Try adding quantities." });
-    return res.status(200).json({
-      ok: true,
-      calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
-      protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
-      carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
-      fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
-    });
+    if (mode === "label") return await labelScan(b, key, res);
+    if (mode === "assist") return await assist(b, key, res);
+    return await estimate(b, key, res);
   } catch (e) {
     return res.status(500).json({ error: "AI request failed." });
   }
 }
+
+async function gemini(key, parts, maxTokens, temp) {
+  return fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: temp == null ? 0.3 : temp, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } } }),
+  });
+}
+
+async function estimate(b, key, res) {
+  const meal = (b.meal || "").toString().slice(0, 500).trim();
+  if (!meal) return res.status(400).json({ error: "No meal described." });
+  const prompt = [
+    "Estimate the total nutrition for this meal. Sum all items.",
+    "Return ONLY compact JSON: {\"calories\":<int>,\"protein\":<int>,\"carbs\":<int>,\"fat\":<int>}. No markdown, no words.",
+    "Use realistic values for the stated quantities; assume typical portions if vague.",
+    "", "MEAL: " + meal,
+  ].join("\n");
+  const r = await gemini(key, [{ text: prompt }], 120);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const data = await r.json();
+  const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
+  const p = safeParse(t);
+  if (!p || p.calories == null) return res.status(200).json({ ok: false, error: "Couldn't estimate that. Add quantities." });
+  return res.status(200).json({ ok: true, calories: int(p.calories), protein: int(p.protein), carbs: int(p.carbs), fat: int(p.fat) });
+}
+
+async function labelScan(b, key, res) {
+  const image = (b.image || "").toString();
+  const mimeType = b.mimeType || "image/jpeg";
+  if (!image) return res.status(400).json({ error: "No image provided." });
+  const prompt = [
+    "This is a photo of a food nutrition label. Read the per-100g values (convert if only per-serving is shown with a serving size).",
+    "Return ONLY compact JSON, no markdown: {\"name\":<string or null>,\"calories_per_100g\":<num>,\"protein_per_100g\":<num>,\"carbs_per_100g\":<num>,\"fat_per_100g\":<num>,\"sugar_per_100g\":<num or null>,\"salt_per_100g\":<num or null>,\"fiber_per_100g\":<num or null>,\"serving_size\":<num grams or null>}.",
+    "If a value isn't legible, use null. Never invent values.",
+  ].join("\n");
+  const r = await gemini(key, [{ text: prompt }, { inlineData: { mimeType, data: image } }], 300);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const data = await r.json();
+  const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
+  const p = safeParse(t);
+  if (!p || p.calories_per_100g == null) return res.status(200).json({ ok: false, error: "Couldn't read that label. Try a clearer, straight-on photo." });
+  return res.status(200).json({ ok: true, food: p });
+}
+
+async function assist(b, key, res) {
+  const q = (b.question || "").toString().slice(0, 300).trim();
+  const c = b.context || {};
+  if (!q) return res.status(400).json({ error: "No question." });
+  const ctx = [
+    "Today so far - calories: " + r0(c.calories) + (c.caloriesGoal ? " of " + c.caloriesGoal + " goal" : ""),
+    "protein: " + r0(c.protein) + "g" + (c.proteinGoal ? " of " + c.proteinGoal + "g goal" : ""),
+    "carbs: " + r0(c.carbs) + "g, fat: " + r0(c.fat) + "g.",
+    c.caloriesGoal ? "Calories remaining: " + Math.round(c.caloriesGoal - (c.calories || 0)) + "." : "",
+    c.proteinGoal ? "Protein remaining: " + Math.round(c.proteinGoal - (c.protein || 0)) + "g." : "",
+  ].filter(Boolean).join(" ");
+  const prompt = [
+    "You are a practical nutrition coach inside a gym app. Answer using their live numbers below.",
+    "Be specific and numbers-first. For food ideas give 2-3 concrete options with rough macros. Under 90 words. At most one emoji. No preamble.",
+    "", "THEIR DAY: " + ctx, "", "QUESTION: " + q,
+  ].join("\n");
+  const r = await gemini(key, [{ text: prompt }], 260, 0.5);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const data = await r.json();
+  const text = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").trim();
+  if (!text) return res.status(200).json({ ok: false, error: "No answer - try rephrasing." });
+  return res.status(200).json({ ok: true, answer: text });
+}
+
+function int(v) { return Math.max(0, Math.round(Number(v) || 0)); }
+function r0(v) { return Math.round(Number(v) || 0); }
 function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
