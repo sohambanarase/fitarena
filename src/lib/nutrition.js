@@ -195,9 +195,13 @@ export async function setFavorite(userId, foodId, on) {
   if (on) return supabase.from("favorite_foods").upsert({ user_id: userId, food_id: foodId }, { onConflict: "user_id,food_id" });
   return supabase.from("favorite_foods").delete().eq("user_id", userId).eq("food_id", foodId);
 }
-// Ensure a food exists in the DB (custom foods / quick foods get saved so they can be favourited/reused).
+// Ensure a food exists in the DB (custom/quick foods get saved so they can be favourited/reused).
+// Reuses an existing row with the same name so tapping the star twice can't create duplicates.
 export async function ensureFood(userId, food) {
   if (food.id) return food;
+  if (food.barcode) { const { data: byCode } = await supabase.from("foods").select("*").eq("barcode", food.barcode).limit(1).maybeSingle(); if (byCode) return byCode; }
+  const { data: byName } = await supabase.from("foods").select("*").eq("user_id", userId).ilike("name", (food.name || "").trim()).limit(1).maybeSingle();
+  if (byName) return byName;
   const { data } = await addFood({ user_id: userId, source: food.source || "custom", name: food.name, brand: food.brand || null,
     calories_per_100g: food.calories_per_100g, protein_per_100g: food.protein_per_100g, carbs_per_100g: food.carbs_per_100g, fat_per_100g: food.fat_per_100g,
     sugar_per_100g: food.sugar_per_100g, salt_per_100g: food.salt_per_100g, fiber_per_100g: food.fiber_per_100g, serving_size: food.serving_size || null });
@@ -301,3 +305,21 @@ export async function updateFoodRow(id, patch) {
   return supabase.from("foods").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
 }
 export async function deleteFoodRow(id) { return supabase.from("foods").delete().eq("id", id); }
+
+// ---- Editing logged entries & managing your own foods ----
+export async function getFood(id) {
+  if (!id) return null;
+  const { data } = await supabase.from("foods").select("*").eq("id", id).maybeSingle();
+  return data || null;
+}
+export async function updateLog(id, patch) {
+  return supabase.from("food_logs").update(patch).eq("id", id);
+}
+// Every food you own (custom, quick-add, AI-saved) — for the "My foods" manager.
+export async function loadMyFoods(userId, q) {
+  let query = supabase.from("foods").select("*").eq("user_id", userId);
+  const tokens = normalizeQuery(q).split(" ").filter(Boolean).slice(0, 5);
+  tokens.forEach((t) => { query = query.or(`name.ilike.%${t}%,brand.ilike.%${t}%`); });
+  const { data } = await query.order("created_at", { ascending: false }).limit(100);
+  return data || [];
+}

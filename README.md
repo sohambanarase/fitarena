@@ -535,3 +535,20 @@ No migration needed. Push the code.
   matched against name *and* brand), and Open Food Facts is queried through two backends in parallel
   with an automatic retry on fewer words — so results are consistent across phones and networks.
 - **Calendar date picker**: tap the date at the top of Count to jump to any past day.
+
+---
+
+## v11.4 — Bloom recoloured, editable diary entries, My foods
+
+No migration needed. Push the code.
+
+- **Bloom is now jade sunrise + royal depth** instead of pink: deep teal/cyan primary, jade green for
+  protein, sunrise coral/amber and sage washes, with a hint of royal navy. All text and accent colours
+  were contrast-checked against the warm ivory background (body text 13:1, accents 4.1–5.0:1).
+- **Edit a logged food**: tap any item in the diary (Dinner, Breakfast, anything) to change the amount
+  on the gram scale, move it to a different meal, favourite it, or remove it. Entries with no linked
+  product (AI or photo estimates) let you edit their totals and name directly.
+- **My foods** (Add food → My foods): every food you've added, scanned-and-saved, or created as a
+  quick item, in one place — search it, tap to log, edit its per-100g values, or delete it.
+- **Favourite star fixed**: it now confirms the change against the database instead of assuming the
+  tap worked, tells you if it fails, and reuses an existing food row instead of creating duplicates.
