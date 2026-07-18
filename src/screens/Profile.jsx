@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft } from "lucide-react";
+import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft, Flower2 } from "lucide-react";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
 import { currentStreak, consistencyScore, toISO } from "../lib/streak.js";
@@ -134,14 +134,18 @@ export default function Profile() {
 
       <div className="card">
         <p className="eyebrow">Appearance</p>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <button onClick={() => switchTheme("dark")} className={"flex items-center justify-center gap-2 rounded-xl py-2.5 font-bold transition " + (theme === "dark" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
-            <Moon size={16} /> Dark
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          <button onClick={() => switchTheme("dark")} className={"flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-bold transition " + (theme === "dark" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
+            <Moon size={15} /> Dark
           </button>
-          <button onClick={() => switchTheme("light")} className={"flex items-center justify-center gap-2 rounded-xl py-2.5 font-bold transition " + (theme === "light" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
-            <Sun size={16} /> Light
+          <button onClick={() => switchTheme("light")} className={"flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-bold transition " + (theme === "light" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
+            <Sun size={15} /> Light
+          </button>
+          <button onClick={() => switchTheme("bloom")} className={"flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-bold transition " + (theme === "bloom" ? "bg-gold text-ink" : "bg-surface2 text-muted")}>
+            <Flower2 size={15} /> Bloom
           </button>
         </div>
+        <p className="mt-1.5 text-[11px] text-muted">Bloom is a soft, colourful daylight theme.</p>
       </div>
 
       <button onClick={() => setShowHelp(true)} className="card flex w-full items-center gap-3 text-left active:scale-[.99]">

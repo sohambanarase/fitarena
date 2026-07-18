@@ -13,10 +13,11 @@
     <script>
       try {
         var t = localStorage.getItem("fitarena.theme");
-        if (t === "light") {
-          document.documentElement.classList.add("light");
+        var bar = { light: "#F5F6F9", bloom: "#FCF7FB" };
+        if (t === "light" || t === "bloom") {
+          document.documentElement.classList.add(t);
           var m = document.querySelector('meta[name="theme-color"]');
-          if (m) m.setAttribute("content", "#F5F6F9");
+          if (m) m.setAttribute("content", bar[t]);
         }
       } catch (e) {}
     </script>

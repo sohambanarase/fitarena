@@ -517,3 +517,21 @@ No new migration (uses v11 tables). Push code. AI needs `GEMINI_API_KEY` (alread
 - **Insights**: a "This week" card (avg kcal, avg protein, days logged, protein-goal hit rate, protein
   still needed today) with a shortcut to the AI coach.
 - **Date navigation**: prev/next day arrows at the top of Count — review or back-fill any day.
+
+---
+
+## v11.3 — customisable quick add, meal photos, better search, calendar, Bloom theme
+
+No migration needed. Push the code.
+
+- **Bloom theme** (Profile → Appearance): a soft, colourful daylight theme — pink/violet, peach and
+  mint washes with deep plum text. Dark and Light are still there; the choice sticks between visits.
+- **Quick add is yours now**: add your own items, edit any item, and remove ones you don't use
+  (including built-ins, with a one-tap "restore built-ins"). Editing a built-in saves your own copy.
+  The staples show instantly even on a slow connection.
+- **Photo in Describe meal**: attach a photo of the meal for a better AI estimate. The photo is only
+  sent for the estimate — nothing is stored.
+- **Search is much more forgiving**: word order and extra words no longer break it (each word is
+  matched against name *and* brand), and Open Food Facts is queried through two backends in parallel
+  with an automatic retry on fewer words — so results are consistent across phones and networks.
+- **Calendar date picker**: tap the date at the top of Count to jump to any past day.

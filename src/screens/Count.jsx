@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { toISO } from "../lib/streak.js";
 import ScreenHeader from "../components/ScreenHeader.jsx";
@@ -12,8 +12,9 @@ import {
   loadLogs, logFood, removeLog, macrosFor, dayTotals, lookupBarcode,
   loadSavedMeals, createSavedMeal, deleteSavedMeal, logSavedMeal, savedMealTotals,
   searchOFF, cacheOffFood, loadFavorites, isFavorite, setFavorite, ensureFood, loadRange, weeklyInsights,
+  loadQuickFoods, builtinQuickFoods, addQuickFood, updateFoodRow, deleteFoodRow, hideDefaultQuick, restoreDefaultQuick, hiddenDefaultCount,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 
@@ -92,7 +93,12 @@ export default function Count() {
 
       <div className="flex items-center justify-between rounded-full bg-surface2 px-2 py-1.5">
         <button onClick={() => shiftDay(-1)} className="grid h-8 w-8 place-items-center rounded-full active:scale-90"><ChevronLeft size={18} /></button>
-        <span className="text-sm font-bold">{dayLabel}</span>
+        <label className="relative flex cursor-pointer items-center gap-1.5">
+          <CalendarDays size={14} className="text-muted" />
+          <span className="text-sm font-bold">{dayLabel}</span>
+          <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Pick a date" />
+        </label>
         <button onClick={() => shiftDay(1)} disabled={isToday} className="grid h-8 w-8 place-items-center rounded-full active:scale-90 disabled:opacity-30"><ChevronRight size={18} /></button>
       </div>
 
@@ -243,7 +249,7 @@ function AddFoodSheet({ userId, date, initial, goals, totals, onClose, onLogged 
     <Sheet title={review ? review.name : titleFor(view)} onClose={onClose}>
       {view === "home" && <HomeChooser onPick={setView} />}
       {view === "search" && <SearchView userId={userId} onPick={openReview} />}
-      {view === "quick" && <QuickView onPick={openReview} />}
+      {view === "quick" && <QuickView userId={userId} onPick={openReview} />}
       {view === "manual" && <ManualView userId={userId} save onPick={openReview} />}
       {view === "saved" && <SavedMealsView userId={userId} date={date} meal={meal} setMeal={setMeal} onLogged={() => { onLogged(); onClose(); }} />}
       {view === "barcode" && <BarcodeView onPick={openReview} />}
@@ -317,13 +323,88 @@ function SearchView({ userId, onPick }) {
     </div>
   );
 }
-function QuickView({ onPick }) {
+function QuickView({ userId, onPick }) {
+  const [items, setItems] = useState(() => builtinQuickFoods()); // instant; user's own merge in below
+  const [editing, setEditing] = useState(null); // food being edited, or "new"
+  const [hiddenN, setHiddenN] = useState(hiddenDefaultCount());
+  // only ever apply the newest fetch — a slow earlier one must not clobber a newer edit
+  const reqRef = useRef(0);
+  const reload = useCallback(() => {
+    const id = ++reqRef.current;
+    loadQuickFoods(userId).then((r) => { if (id === reqRef.current) setItems(r); }).catch(() => {});
+  }, [userId]);
+  const applyLocal = (updater) => { reqRef.current++; setItems(updater); };
+  useEffect(() => { reload(); }, [reload]);
+
+  if (editing) return (
+    <QuickForm userId={userId} food={editing === "new" ? null : editing}
+      onCancel={() => setEditing(null)}
+      onSaved={() => { setEditing(null); setHiddenN(hiddenDefaultCount()); reload(); }} />
+  );
+
   return (
-    <div className="space-y-1.5">
-      <p className="eyebrow">Gym staples · tap to log</p>
-      <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
-        {QUICK_FOODS.map((f, i) => <FoodRow key={i} food={f} onClick={() => onPick({ ...f, source: "quickadd" })} />)}
+    <div className="space-y-2">
+      <p className="eyebrow">Tap to log · edit or remove any item</p>
+      <div className="max-h-[52vh] space-y-1.5 overflow-y-auto">
+        {items.map((f, i) => (
+          <div key={f.id || "b" + i} className="panel flex items-center gap-2 p-2.5">
+            <button onClick={() => onPick({ ...f })} className="flex min-w-0 flex-1 items-center gap-3 text-left active:scale-[.99]">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface2 font-display text-line">{(f.name || "?")[0].toUpperCase()}</div>
+              <div className="min-w-0">
+                <p className="truncate font-bold capitalize">{f.name}</p>
+                <p className="text-[11px] text-muted">{Math.round(f.calories_per_100g || 0)} kcal · {f.protein_per_100g || 0}g P /100g</p>
+              </div>
+            </button>
+            <button onClick={() => setEditing(f)} aria-label="Edit" className="text-muted active:scale-90"><Pencil size={15} /></button>
+            <button aria-label="Remove" className="text-muted active:scale-90 hover:text-ember"
+              onClick={async () => {
+                applyLocal((prev) => prev.filter((x) => (f.id ? x.id !== f.id : x.name !== f.name)));   // instant
+                if (f.builtin) { hideDefaultQuick(f.name); setHiddenN(hiddenDefaultCount()); } else { await deleteFoodRow(f.id); }
+                reload();
+              }}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
       </div>
+      <button onClick={() => setEditing("new")} className="pill flex w-full items-center justify-center gap-1 py-2.5"><Plus size={14} /> Add your own quick item</button>
+      {hiddenN > 0 && (
+        <button onClick={() => { restoreDefaultQuick(); setHiddenN(0); applyLocal(builtinQuickFoods()); reload(); }} className="flex w-full items-center justify-center gap-1 text-[11px] font-semibold text-muted">
+          <RotateCcw size={12} /> Restore {hiddenN} built-in item{hiddenN !== 1 ? "s" : ""}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function QuickForm({ userId, food, onSaved, onCancel }) {
+  const [f, setF] = useState({
+    name: food?.name || "", calories_per_100g: food?.calories_per_100g ?? "", protein_per_100g: food?.protein_per_100g ?? "",
+    carbs_per_100g: food?.carbs_per_100g ?? "", fat_per_100g: food?.fat_per_100g ?? "", serving_size: food?.serving_size ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const ok = f.name.trim() && f.calories_per_100g !== "";
+  async function save() {
+    setBusy(true);
+    const payload = { name: f.name.trim(), calories_per_100g: num(f.calories_per_100g), protein_per_100g: num(f.protein_per_100g), carbs_per_100g: num(f.carbs_per_100g), fat_per_100g: num(f.fat_per_100g), serving_size: num(f.serving_size) };
+    if (food && food.id) await updateFoodRow(food.id, payload);
+    else { await addQuickFood(userId, payload); if (food && food.builtin) hideDefaultQuick(food.name); } // editing a built-in makes your own copy
+    setBusy(false); onSaved();
+  }
+  return (
+    <div className="space-y-3">
+      <button onClick={onCancel} className="pill">← Quick add</button>
+      <p className="text-sm text-muted">Values per 100g. {food?.builtin ? "Saving makes this your own editable copy." : ""}</p>
+      <input className="inp" placeholder="Name (e.g. Protein bar)" value={f.name} onChange={(e) => set("name", e.target.value)} autoFocus />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Calories /100g" value={f.calories_per_100g} onChange={(v) => set("calories_per_100g", v)} />
+        <Field label="Protein /100g ★" value={f.protein_per_100g} onChange={(v) => set("protein_per_100g", v)} />
+        <Field label="Carbs /100g" value={f.carbs_per_100g} onChange={(v) => set("carbs_per_100g", v)} />
+        <Field label="Fat /100g" value={f.fat_per_100g} onChange={(v) => set("fat_per_100g", v)} />
+      </div>
+      <Field label="Usual serving (g, optional)" value={f.serving_size} onChange={(v) => set("serving_size", v)} />
+      <button className="btn-primary w-full" disabled={!ok || busy} onClick={save}>{busy ? "Saving…" : "Save item"}</button>
     </div>
   );
 }
@@ -414,10 +495,21 @@ function AIDescribe({ onLog, meal, setMeal }) {
   const [busy, setBusy] = useState(false);
   const [est, setEst] = useState(null);
   const [err, setErr] = useState(null);
+  const [photo, setPhoto] = useState(null); // { b64, mime, name } — kept in memory only, never stored
+  async function pickPhoto(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
+      setPhoto({ b64, mime: file.type || "image/jpeg", name: file.name || "photo" });
+    } catch { setErr("Couldn't read that photo."); }
+  }
   async function estimate() {
     setBusy(true); setErr(null);
     try {
-      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "estimate", meal: text }) });
+      const body = { mode: "estimate", meal: text };
+      if (photo) { body.image = photo.b64; body.mimeType = photo.mime; }
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json();
       if (!res.ok || !j.ok) setErr(j.error || "Couldn't estimate. Try rephrasing.");
       else setEst({ calories: j.calories, protein: j.protein, carbs: j.carbs, fat: j.fat });
@@ -426,11 +518,24 @@ function AIDescribe({ onLog, meal, setMeal }) {
   }
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted">Describe your meal, e.g. "200g cooked rice, 150g chicken breast, 1 spoon olive oil". You can edit the estimate before saving.</p>
+      <p className="text-sm text-muted">Describe your meal, e.g. "200g cooked rice, 150g chicken breast, 1 spoon olive oil". Add a photo for a better estimate. You can edit before saving.</p>
       <textarea className="inp min-h-[90px]" value={text} onChange={(e) => setText(e.target.value)} placeholder="Describe what you ate…" />
+      {photo ? (
+        <div className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+          <ImageIcon size={16} className="text-mint" />
+          <span className="min-w-0 flex-1 truncate text-sm">Photo attached</span>
+          <button onClick={() => setPhoto(null)} className="text-muted active:scale-90"><X size={16} /></button>
+        </div>
+      ) : (
+        <label className="pill flex w-full cursor-pointer items-center justify-center gap-1.5 py-2.5">
+          <Camera size={14} /> Add a photo of the meal (optional)
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={pickPhoto} />
+        </label>
+      )}
+      <p className="text-[11px] text-muted">Photos are only sent for the estimate — nothing is stored.</p>
       {err && <p className="text-sm text-ember">{err}</p>}
       {!est ? (
-        <button className="btn-primary w-full" disabled={!text.trim() || busy} onClick={estimate}>{busy ? "Estimating…" : "Estimate with AI"}</button>
+        <button className="btn-primary w-full" disabled={(!text.trim() && !photo) || busy} onClick={estimate}>{busy ? "Estimating…" : "Estimate with AI"}</button>
       ) : (
         <div className="space-y-3">
           <p className="eyebrow">Estimate (editable) · AI estimate</p>
@@ -442,7 +547,7 @@ function AIDescribe({ onLog, meal, setMeal }) {
           </div>
           <MealPicker meal={meal} setMeal={setMeal} />
           <button className="btn-primary w-full" onClick={() => onLog({
-            name: text.trim().slice(0, 60), quantity: 1, quantity_unit: "meal",
+            name: (text.trim() || "Meal from photo").slice(0, 60), quantity: 1, quantity_unit: "meal",
             calculated_calories: est.calories, calculated_protein: est.protein, calculated_carbs: est.carbs, calculated_fat: est.fat,
           })}>Add to today</button>
         </div>

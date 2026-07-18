@@ -35,9 +35,14 @@ export async function saveGoals(userId, g) {
 
 // ---- Foods ----
 export async function addFood(food) { return supabase.from("foods").insert(food).select().single(); }
+export function normalizeQuery(q) {
+  return (q || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s%]/g, " ").replace(/\s+/g, " ").trim();
+}
+// Matches every word anywhere in the name OR brand, in any order.
 export async function searchFoods(userId, q) {
   let query = supabase.from("foods").select("*").or(`user_id.eq.${userId},user_id.is.null`);
-  if (q && q.trim()) query = query.ilike("name", "%" + q.trim() + "%");
+  const tokens = normalizeQuery(q).split(" ").filter(Boolean).slice(0, 5);
+  tokens.forEach((t) => { query = query.or(`name.ilike.%${t}%,brand.ilike.%${t}%`); });
   const { data } = await query.order("created_at", { ascending: false }).limit(40);
   return data || [];
 }
@@ -112,17 +117,47 @@ export async function lookupBarcode(barcode) {
     return mapOff(j.product, barcode);
   } catch { return null; } finally { clearTimeout(t); }
 }
-// Search Open Food Facts by name (for products without a handy barcode, e.g. "starbucks latte").
-export async function searchOFF(query) {
+const OFF_FIELDS = "code,product_name,brands,image_front_small_url,nutriments,serving_quantity";
+async function getJSON(url, ms) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 9000);
-  try {
-    const url = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=" + encodeURIComponent(query) +
-      "&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,image_front_small_url,nutriments,serving_quantity";
-    const res = await fetch(url, { signal: ctrl.signal });
-    const j = await res.json();
-    return (j.products || []).map((p) => mapOff(p)).filter((f) => f.name && f.calories_per_100g != null);
-  } catch { return []; } finally { clearTimeout(t); }
+  const t = setTimeout(() => ctrl.abort(), ms || 9000);
+  try { const r = await fetch(url, { signal: ctrl.signal }); if (!r.ok) return null; return await r.json(); }
+  catch { return null; } finally { clearTimeout(t); }
+}
+const cleanHits = (arr) => (arr || []).map((p) => mapOff(p)).filter((f) => f.name && f.calories_per_100g != null);
+
+// Search Open Food Facts by name (products without a handy barcode, e.g. "starbucks latte").
+// Two independent search backends + a progressive word-drop retry, so results don't depend on
+// exact wording or on one endpoint being slow/rate-limited on a given device/network.
+export async function searchOFF(query) {
+  const q = normalizeQuery(query);
+  if (!q) return [];
+  const modern = async (term) => {
+    const j = await getJSON("https://search.openfoodfacts.org/api/v1/search?q=" + encodeURIComponent(term) + "&page_size=20&fields=" + OFF_FIELDS, 8000);
+    return cleanHits(j && (j.hits || j.products));
+  };
+  const legacy = async (term) => {
+    const j = await getJSON("https://world.openfoodfacts.org/cgi/search.pl?search_terms=" + encodeURIComponent(term) +
+      "&search_simple=1&action=process&json=1&page_size=20&fields=" + OFF_FIELDS, 9000);
+    return cleanHits(j && j.products);
+  };
+  // both backends in parallel for the full phrase — take whatever comes back
+  const [a, b] = await Promise.all([modern(q).catch(() => []), legacy(q).catch(() => [])]);
+  let out = dedupeFoods([...(a || []), ...(b || [])]);
+  if (out.length) return out;
+  // still nothing: retry with fewer words (handles "extra word kills the match")
+  const words = q.split(" ");
+  for (let n = words.length - 1; n >= 1 && !out.length; n--) {
+    const term = words.slice(0, n).join(" ");
+    const [c, d] = await Promise.all([modern(term).catch(() => []), legacy(term).catch(() => [])]);
+    out = dedupeFoods([...(c || []), ...(d || [])]);
+  }
+  return out;
+}
+function dedupeFoods(list) {
+  const seen = new Set(); const out = [];
+  list.forEach((f) => { const k = (f.barcode || "") + "|" + (f.name || "").toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(f); } });
+  return out;
 }
 // Cache a public OFF food into our foods table (so it's searchable & favouritable). Dedupes by barcode.
 export async function cacheOffFood(food) {
@@ -229,3 +264,40 @@ export function savedMealTotals(savedMeal) {
     return { cal: t.cal + (m.calories || 0), p: t.p + (m.protein || 0) };
   }, { cal: 0, p: 0 });
 }
+
+// ---- Quick add: built-in staples + the user's own, editable ----
+const HIDDEN_KEY = "fitarena.quickHidden";
+function hiddenDefaults() { try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]"); } catch { return []; } }
+function setHiddenDefaults(list) { try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(list)); } catch {} }
+export function hideDefaultQuick(name) { const h = hiddenDefaults(); if (!h.includes(name)) setHiddenDefaults([...h, name]); }
+export function restoreDefaultQuick() { setHiddenDefaults([]); }
+export function hiddenDefaultCount() { return hiddenDefaults().length; }
+
+// Built-ins are available synchronously so the list never waits on the network.
+export function builtinQuickFoods() {
+  const hidden = hiddenDefaults();
+  return QUICK_FOODS.filter((f) => !hidden.includes(f.name)).map((f) => ({ ...f, builtin: true, source: "quickadd" }));
+}
+// Returns [{...food, builtin:true|false}] — built-ins first, then the user's own.
+export async function loadQuickFoods(userId) {
+  const builtins = builtinQuickFoods();
+  let mine = [];
+  try {
+    // never let a slow/offline backend hide the staples
+    const q = supabase.from("foods").select("*").eq("user_id", userId).eq("source", "quickadd").order("created_at", { ascending: true });
+    const { data } = await Promise.race([q, new Promise((r) => setTimeout(() => r({ data: [] }), 6000))]);
+    mine = data || [];
+  } catch { mine = []; }
+  return [...builtins, ...mine.map((f) => ({ ...f, builtin: false }))];
+}
+export async function addQuickFood(userId, food) {
+  return supabase.from("foods").insert({
+    user_id: userId, source: "quickadd", name: food.name, brand: food.brand || null,
+    calories_per_100g: food.calories_per_100g, protein_per_100g: food.protein_per_100g,
+    carbs_per_100g: food.carbs_per_100g, fat_per_100g: food.fat_per_100g, serving_size: food.serving_size || null,
+  }).select().single();
+}
+export async function updateFoodRow(id, patch) {
+  return supabase.from("foods").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+}
+export async function deleteFoodRow(id) { return supabase.from("foods").delete().eq("id", id); }

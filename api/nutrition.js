@@ -29,14 +29,18 @@ async function gemini(key, parts, maxTokens, temp) {
 
 async function estimate(b, key, res) {
   const meal = (b.meal || "").toString().slice(0, 500).trim();
-  if (!meal) return res.status(400).json({ error: "No meal described." });
+  const image = (b.image || "").toString();
+  if (!meal && !image) return res.status(400).json({ error: "No meal described." });
   const prompt = [
     "Estimate the total nutrition for this meal. Sum all items.",
+    image ? "A photo of the meal is attached - identify the foods and estimate portion sizes from it. If a text description is also given, it takes priority for quantities." : "",
     "Return ONLY compact JSON: {\"calories\":<int>,\"protein\":<int>,\"carbs\":<int>,\"fat\":<int>}. No markdown, no words.",
     "Use realistic values for the stated quantities; assume typical portions if vague.",
-    "", "MEAL: " + meal,
-  ].join("\n");
-  const r = await gemini(key, [{ text: prompt }], 120);
+    "", "MEAL: " + (meal || "(see photo)"),
+  ].filter(Boolean).join("\n");
+  const parts = [{ text: prompt }];
+  if (image) parts.push({ inlineData: { mimeType: b.mimeType || "image/jpeg", data: image } });
+  const r = await gemini(key, parts, 120);
   if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
   const data = await r.json();
   const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();

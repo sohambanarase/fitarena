@@ -69,6 +69,38 @@
     --btn-glow: 0 12px 28px -12px rgba(99,91,255,.55);
   }
 
+  /* ---------- BLOOM: soft, colourful, inviting ---------- */
+  .bloom {
+    --c-ink: 252 247 251;
+    --c-surface: 255 255 255;
+    --c-surface2: 246 239 252;
+    --c-line: 234 223 246;
+    --c-gold: 201 62 154;
+    --c-goldDim: 172 46 130;
+    --c-ember: 240 108 96;
+    --c-mint: 16 163 140;
+    --c-paper: 46 28 62;
+    --c-muted: 124 105 142;
+    --grad-gold:  linear-gradient(135deg, rgb(247 120 186), rgb(163 84 224));
+    --grad-mint:  linear-gradient(135deg, rgb(94 220 190), rgb(20 172 156));
+    --grad-ember: linear-gradient(135deg, rgb(255 166 122), rgb(244 96 122));
+    --bg-grad:
+      radial-gradient(70% 42% at 8% -4%, rgba(255,166,196,.34), transparent 62%),
+      radial-gradient(65% 40% at 100% 2%, rgba(168,140,255,.30), transparent 60%),
+      radial-gradient(75% 42% at 96% 60%, rgba(255,206,150,.26), transparent 62%),
+      radial-gradient(90% 50% at 20% 108%, rgba(120,224,206,.30), transparent 64%);
+    --glass-bg: rgba(255,255,255,.52);
+    --glass-bg-strong: rgba(255,255,255,.80);
+    --glass-border: rgba(150,110,180,.18);
+    --glass-inset: rgba(255,255,255,.90);
+    --glass-sheen: rgba(255,255,255,.60);
+    --glass-shadow: 0 8px 32px rgba(120,60,140,.15), 0 2px 8px rgba(120,60,140,.08);
+    --glass-shadow-lift: 0 16px 48px rgba(120,60,140,.22), 0 4px 12px rgba(120,60,140,.10);
+    --btn-glow: 0 12px 28px -12px rgba(201,62,154,.55);
+    --nav-bg: rgba(255,255,255,.64);
+    --sheet-bg: rgba(253,250,254,.98);
+  }
+
   html, body, #root { height: 100%; }
   body {
     @apply text-paper font-body antialiased;
