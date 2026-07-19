@@ -69,37 +69,37 @@
     --btn-glow: 0 12px 28px -12px rgba(99,91,255,.55);
   }
 
-  /* ---------- BLOOM: jade sunrise + royal depth ---------- */
+  /* ---------- BLOOM: ocean blue + soft summer ---------- */
   .bloom {
-    --c-ink: 250 246 238;
+    --c-ink: 248 247 243;
     --c-surface: 255 255 255;
-    --c-surface2: 238 240 235;
-    --c-line: 223 224 214;
-    --c-gold: 9 124 135;
-    --c-goldDim: 6 98 108;
-    --c-ember: 205 76 66;
-    --c-mint: 11 120 98;
-    --c-paper: 19 46 56;
-    --c-muted: 98 118 124;
-    --grad-gold:  linear-gradient(135deg, rgb(16 132 146), rgb(4 84 82));
-    --grad-mint:  linear-gradient(135deg, rgb(72 182 148), rgb(8 116 98));
-    --grad-ember: linear-gradient(135deg, rgb(250 152 112), rgb(214 82 78));
+    --c-surface2: 234 239 243;
+    --c-line: 216 226 233;
+    --c-gold: 19 110 163;
+    --c-goldDim: 13 88 133;
+    --c-ember: 196 78 62;
+    --c-mint: 11 124 114;
+    --c-paper: 17 43 61;
+    --c-muted: 95 117 134;
+    --grad-gold:  linear-gradient(135deg, rgb(26 128 180), rgb(10 62 104));
+    --grad-mint:  linear-gradient(135deg, rgb(78 190 178), rgb(9 124 118));
+    --grad-ember: linear-gradient(135deg, rgb(250 168 120), rgb(220 96 78));
     --bg-grad:
-      radial-gradient(66% 40% at 4% -4%, rgba(252,164,124,.34), transparent 62%),
-      radial-gradient(62% 38% at 100% 0%, rgba(35,206,217,.28), transparent 60%),
-      radial-gradient(60% 36% at 104% 52%, rgba(249,215,121,.30), transparent 62%),
-      radial-gradient(86% 46% at 12% 106%, rgba(161,204,166,.38), transparent 64%),
-      radial-gradient(60% 34% at 92% 104%, rgba(41,60,124,.12), transparent 62%);
+      radial-gradient(64% 40% at 2% -4%, rgba(255,186,140,.30), transparent 62%),
+      radial-gradient(66% 40% at 100% -2%, rgba(86,196,224,.34), transparent 62%),
+      radial-gradient(58% 34% at 104% 48%, rgba(250,222,150,.26), transparent 62%),
+      radial-gradient(84% 46% at 8% 104%, rgba(126,206,196,.34), transparent 64%),
+      radial-gradient(58% 34% at 96% 106%, rgba(150,166,224,.22), transparent 62%);
     --glass-bg: rgba(255,255,255,.54);
     --glass-bg-strong: rgba(255,255,255,.82);
-    --glass-border: rgba(9,124,135,.16);
+    --glass-border: rgba(30,100,150,.16);
     --glass-inset: rgba(255,255,255,.90);
     --glass-sheen: rgba(255,255,255,.62);
-    --glass-shadow: 0 8px 32px rgba(16,64,72,.14), 0 2px 8px rgba(16,64,72,.08);
-    --glass-shadow-lift: 0 16px 48px rgba(16,64,72,.20), 0 4px 12px rgba(16,64,72,.10);
-    --btn-glow: 0 12px 28px -12px rgba(9,124,135,.55);
+    --glass-shadow: 0 8px 32px rgba(16,56,84,.14), 0 2px 8px rgba(16,56,84,.08);
+    --glass-shadow-lift: 0 16px 48px rgba(16,56,84,.20), 0 4px 12px rgba(16,56,84,.10);
+    --btn-glow: 0 12px 28px -12px rgba(19,110,163,.55);
     --nav-bg: rgba(255,255,255,.66);
-    --sheet-bg: rgba(252,250,245,.98);
+    --sheet-bg: rgba(251,251,248,.98);
   }
 
   html, body, #root { height: 100%; }

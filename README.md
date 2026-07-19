@@ -552,3 +552,37 @@ No migration needed. Push the code.
   quick item, in one place — search it, tap to log, edit its per-100g values, or delete it.
 - **Favourite star fixed**: it now confirms the change against the database instead of assuming the
   tap worked, tells you if it fails, and reuses an existing food row instead of creating duplicates.
+
+---
+
+## v12 — Indian foods (IFCT 2017), calories burned, ocean Bloom
+
+**Database step:** run `supabase/migration_v12.sql` (activity/calorie-burn log). Then push.
+
+### Indian food data
+Search now looks in three places, in order: **your foods → Indian foods → Open Food Facts**, with AI
+estimate as the fallback for anything not found.
+
+- **IFCT 2017** (Indian Food Composition Tables, National Institute of Nutrition / ICMR) — 542 foods
+  with real per-100g values, bundled locally so it's instant and works offline. Regional names are
+  searchable, so "rajma", "chana", "atta", "poha" all hit the right entry.
+- **~60 common dishes** (dal tadka, butter chicken, chapati, idli, dosa, chole, biryani, paneer
+  dishes, samosa, chai…) as typical recipe values, marked `DISH` and always editable before logging.
+- Everyday aliases are mapped (besan → gram flour, moong → green gram, toor → red gram, suji →
+  semolina, dahi → curd…), and each search word can match the name *or* a regional name in any order.
+- The dataset is loaded only when you first search, so the app still starts fast (adds ~19 kB gzip).
+- Picking a dataset food saves it to your foods, so it shows up in recents and can be favourited.
+
+### Calories burned
+A new activity card on Count, right under the quick actions. Burned calories are **added back to the
+day's budget** (remaining = goal + burned − eaten), and the ring accounts for them.
+- **From workout** — reads what you logged in Grind that day (exercises, sets, top weights, session
+  minutes) and estimates the burn with AI, using your bodyweight from Profile.
+- **Describe** — "45 min football", "30 min run at 10 km/h" → AI estimate.
+- **Manual** — type the calories yourself.
+Every AI estimate is editable before saving and the numbers are deliberately conservative — training
+burns are easy to overestimate.
+
+### Bloom, recoloured
+Ocean blues (deep navy → sea blue) with soft summer washes: peach, aqua, sand-yellow, seafoam and a
+touch of periwinkle. Contrast re-checked: body text 13.6:1, accents 4.1–5.2:1.

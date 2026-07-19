@@ -14,8 +14,9 @@ import {
   searchOFF, cacheOffFood, loadFavorites, isFavorite, setFavorite, ensureFood, loadRange, weeklyInsights,
   loadQuickFoods, builtinQuickFoods, addQuickFood, updateFoodRow, deleteFoodRow, hideDefaultQuick, restoreDefaultQuick, hiddenDefaultCount,
   getFood, updateLog, loadMyFoods,
+  loadBurn, addBurn, removeBurn, burnTotal, workoutSummary,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 
@@ -47,7 +48,7 @@ function MacroBar({ label, value, goal, color, star }) {
 }
 
 export default function Count() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const today = toISO(new Date());
   const [date, setDate] = useState(today);
   const [goals, setGoals] = useState(null);
@@ -57,6 +58,8 @@ export default function Count() {
   const [showGoals, setShowGoals] = useState(false);
   const [add, setAdd] = useState(null); // { view, meal }
   const [editLog, setEditLog] = useState(null);
+  const [burn, setBurn] = useState([]);
+  const [showBurn, setShowBurn] = useState(false);
   const isToday = date === today;
   const shiftDay = (d) => setDate(toISO(new Date(new Date(date + "T00:00:00").getTime() + d * 86400000)));
   const dayLabel = isToday ? "Today" : new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -64,14 +67,15 @@ export default function Count() {
   const load = useCallback(async () => {
     setLoading(true);
     const since = toISO(new Date(Date.now() - 6 * 86400000));
-    const [g, l, range] = await Promise.all([loadGoals(user.id), loadLogs(user.id, date), loadRange(user.id, since)]);
-    setGoals(g); setLogs(l); setInsights(weeklyInsights(range, g)); setLoading(false);
+    const [g, l, range, bn] = await Promise.all([loadGoals(user.id), loadLogs(user.id, date), loadRange(user.id, since), loadBurn(user.id, date)]);
+    setGoals(g); setLogs(l); setInsights(weeklyInsights(range, g)); setBurn(bn); setLoading(false);
   }, [user.id, date]);
   useEffect(() => { load(); }, [load]);
 
   const t = dayTotals(logs);
+  const burned = burnTotal(burn);
   const calGoal = goals?.calories_goal || 0;
-  const remaining = calGoal ? Math.round(calGoal - t.calories) : null;
+  const remaining = calGoal ? Math.round(calGoal + burned - t.calories) : null;
   const byMeal = useMemo(() => {
     const m = {}; MEALS.forEach((k) => (m[k] = []));
     logs.forEach((l) => (m[l.meal_type] || (m[l.meal_type] = [])).push(l));
@@ -115,9 +119,10 @@ export default function Count() {
               </button>
             ) : (
               <div className="flex items-center gap-4">
-                <Ring value={t.calories} goal={calGoal}>
+                <Ring value={t.calories} goal={calGoal + burned}>
                   <p className="font-score text-2xl font-bold">{remaining != null ? remaining : Math.round(t.calories)}</p>
                   <p className="text-[10px] text-muted">{remaining != null ? "kcal left" : "kcal"}</p>
+                  {burned > 0 && <p className="mt-0.5 text-[9px] font-bold text-mint">+{Math.round(burned)} burned</p>}
                 </Ring>
                 <div className="min-w-0 flex-1 space-y-2.5">
                   <div>
@@ -143,6 +148,29 @@ export default function Count() {
                 <span className="text-[11px] font-bold">{label}</span>
               </button>
             ))}
+          </div>
+
+          {/* activity / calories burned */}
+          <div className="panel">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface2"><Flame size={18} className="text-mint" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold">{burned > 0 ? Math.round(burned) + " kcal burned" : "No activity logged"}</p>
+                <p className="text-[11px] text-muted">{burned > 0 ? "Added back to today's budget" : "Log a workout or activity to earn calories back"}</p>
+              </div>
+              <button onClick={() => setShowBurn(true)} className="pill flex items-center gap-1"><Plus size={13} /> Add</button>
+            </div>
+            {burn.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {burn.map((r) => (
+                  <div key={r.id} className="flex items-center gap-2 rounded-lg bg-surface2 px-3 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold capitalize">{r.label}</span>
+                    <span className="font-score text-[12px] text-mint">{Math.round(r.calories)} kcal</span>
+                    <button onClick={async () => { await removeBurn(r.id); load(); }} aria-label="Delete activity" className="text-muted active:scale-90 hover:text-ember"><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* meals */}
@@ -200,6 +228,7 @@ export default function Count() {
       {showGoals && <GoalsSheet userId={user.id} goals={goals} onClose={() => setShowGoals(false)} onSaved={load} />}
       {add && <AddFoodSheet userId={user.id} date={date} initial={add} goals={goals} totals={t} onClose={() => setAdd(null)} onLogged={load} />}
       {editLog && <EditLogSheet userId={user.id} entry={editLog} onClose={() => setEditLog(null)} onSaved={load} />}
+      {showBurn && <BurnSheet userId={user.id} date={date} weightKg={profile?.current_weight_kg} onClose={() => setShowBurn(false)} onSaved={load} />}
     </div>
   );
 }
@@ -292,13 +321,16 @@ function HomeChooser({ onPick }) {
 function SearchView({ userId, onPick }) {
   const [q, setQ] = useState("");
   const [local, setLocal] = useState([]);
+  const [indian, setIndian] = useState([]);
   const [off, setOff] = useState([]);
   const [recent, setRecent] = useState([]);
   const [favs, setFavs] = useState([]);
   const [searching, setSearching] = useState(false);
   useEffect(() => { recentFoods(userId).then(setRecent); loadFavorites(userId).then(setFavs); }, [userId]);
   useEffect(() => {
-    if (!q.trim()) { setLocal([]); setOff([]); return; }
+    if (!q.trim()) { setLocal([]); setIndian([]); setOff([]); return; }
+    // dataset is loaded on first search only, so it never slows the app's first paint
+    import("../data/indianFoods.js").then((m) => setIndian(m.searchIndian(q))).catch(() => {});
     setSearching(true);
     const t = setTimeout(async () => {
       const [l, o] = await Promise.all([searchFoods(userId, q), searchOFF(q)]);
@@ -322,10 +354,12 @@ function SearchView({ userId, onPick }) {
         <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
           {local.length > 0 && <p className="eyebrow">Your foods</p>}
           {local.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
+          {indian.length > 0 && <p className="eyebrow pt-1">Indian foods · IFCT 2017</p>}
+          {indian.map((f, i) => <FoodRow key={"in" + i} food={f} onClick={() => onPick(f)} />)}
           {off.length > 0 && <p className="eyebrow pt-1">Open Food Facts</p>}
           {off.map((f, i) => <FoodRow key={"off" + i} food={f} onClick={() => onPick(f)} />)}
-          {searching && <p className="px-1 text-sm text-muted">Searching…</p>}
-          {!searching && local.length === 0 && off.length === 0 && <p className="px-1 text-sm text-muted">No match. Add it manually or use AI.</p>}
+          {searching && <p className="px-1 text-sm text-muted">Searching packaged products…</p>}
+          {!searching && local.length === 0 && indian.length === 0 && off.length === 0 && <p className="px-1 text-sm text-muted">No match. Add it manually or use AI.</p>}
         </div>
       )}
     </div>
@@ -424,6 +458,8 @@ function FoodRow({ food, onClick }) {
         <p className="truncate font-bold capitalize">{food.name}</p>
         <p className="text-[11px] text-muted">{food.brand ? food.brand + " · " : ""}{Math.round(food.calories_per_100g || 0)} kcal · {food.protein_per_100g || 0}g P /100g</p>
       </div>
+      {food.source === "ifct" && <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[9px] font-bold text-muted">IFCT</span>}
+      {food.source === "recipe" && <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[9px] font-bold text-muted">DISH</span>}
     </button>
   );
 }
@@ -667,7 +703,7 @@ function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
       {favErr && <p className="text-[11px] text-ember">{favErr}</p>}
 
       <div className="panel">
-        <div className="mb-1.5 flex items-center justify-between"><p className="eyebrow">Per 100g</p><button onClick={() => setEdit(!edit)} className="pill">{edit ? "done" : "edit values"}</button></div>
+        <div className="mb-1.5 flex items-center justify-between"><p className="eyebrow">Per 100g{f.source === "recipe" ? " · typical recipe" : f.source === "ifct" ? " · IFCT 2017" : ""}</p><button onClick={() => setEdit(!edit)} className="pill">{edit ? "done" : "edit values"}</button></div>
         {edit ? (
           <div className="grid grid-cols-2 gap-2">
             <Field label="Calories" value={f.calories_per_100g ?? ""} onChange={(v) => setField("calories_per_100g", num(v))} />
@@ -699,11 +735,15 @@ function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
 
       <MealPicker meal={meal} setMeal={setMeal} />
 
-      <button className="btn-primary w-full py-4 text-base" onClick={() => onAdd({
-        food_id: food.id || null, name: f.name, quantity: grams, quantity_unit: "g", quantity_grams: grams,
+      <button className="btn-primary w-full py-4 text-base" onClick={async () => {
+        let id = f.id || food.id || null;
+        if (!id) { const saved = await ensureFood(userId, f); id = (saved && saved.id) || null; }   // dataset/quick items become reusable
+        onAdd({
+        food_id: id, name: f.name, quantity: grams, quantity_unit: "g", quantity_grams: grams,
         calculated_calories: m.calories, calculated_protein: m.protein, calculated_carbs: m.carbs, calculated_fat: m.fat,
         calculated_sugar: m.sugar, calculated_salt: m.salt, calculated_fiber: m.fiber,
-      })}>Add to {MEAL_LABELS[meal]}</button>
+        });
+      }}>Add to {MEAL_LABELS[meal]}</button>
     </div>
   );
 }
@@ -956,5 +996,106 @@ function FoodEditor({ food, onCancel, onSaved }) {
       }}>{busy ? "Saving…" : "Save changes"}</button>
       <p className="text-[11px] text-muted">Editing a food changes it for future logs. Entries already in your diary keep the numbers they were logged with.</p>
     </div>
+  );
+}
+
+/* ---------- Calories burned ---------- */
+function BurnSheet({ userId, date, weightKg, onClose, onSaved }) {
+  const [mode, setMode] = useState("workout");
+  const [wk, setWk] = useState(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [result, setResult] = useState(null);   // { label, calories, minutes, source }
+  const [manual, setManual] = useState({ label: "", calories: "", minutes: "" });
+
+  useEffect(() => { workoutSummary(userId, date).then(setWk).catch(() => setWk({ count: 0, minutes: 0, exercises: [] })); }, [userId, date]);
+
+  async function estimate(payload, source) {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "burn", weightKg, ...payload }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) setErr(j.error || "Couldn't estimate that.");
+      else setResult({ label: j.label, calories: j.calories, minutes: j.minutes, source });
+    } catch { setErr("AI is offline right now."); }
+    setBusy(false);
+  }
+
+  async function save(entry) {
+    setBusy(true);
+    await addBurn(userId, date, entry);
+    setBusy(false); onSaved(); onClose();
+  }
+
+  const tabs = [["workout", "From workout"], ["describe", "Describe"], ["manual", "Manual"]];
+
+  return (
+    <Sheet title="Calories burned" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="flex gap-1.5">
+          {tabs.map(([k, l]) => <button key={k} onClick={() => { setMode(k); setResult(null); setErr(null); }} className={"pill flex-1 py-2 " + (mode === k ? "pill-on" : "")}>{l}</button>)}
+        </div>
+
+        {mode === "workout" && (
+          <div className="space-y-3">
+            {wk === null ? <Loader label="Checking today's training…" /> : wk.count === 0 && !wk.minutes ? (
+              <p className="text-sm text-muted">Nothing logged in Grind for this day yet. Log your workout there first, or use Describe / Manual.</p>
+            ) : (
+              <>
+                <div className="panel">
+                  <p className="eyebrow mb-1 flex items-center gap-1"><Dumbbell size={12} /> Today in Grind</p>
+                  <p className="text-sm">{wk.count} exercise{wk.count !== 1 ? "s" : ""}{wk.minutes ? " · " + wk.minutes + " min session" : ""}</p>
+                  {wk.exercises.length > 0 && <p className="mt-1 text-[11px] text-muted">{wk.exercises.slice(0, 4).join(" · ")}{wk.exercises.length > 4 ? " …" : ""}</p>}
+                </div>
+                <button className="btn-primary w-full py-3.5" disabled={busy} onClick={() => estimate({ workout: wk }, "workout")}>
+                  {busy ? "Estimating…" : "Estimate with AI"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {mode === "describe" && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted">e.g. "45 min football", "30 min run at 10 km/h", "1 hour cycling to work and back".</p>
+            <textarea className="inp min-h-[80px]" value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you do?" />
+            <button className="btn-primary w-full" disabled={!text.trim() || busy} onClick={() => estimate({ activity: text }, "ai")}>{busy ? "Estimating…" : "Estimate with AI"}</button>
+          </div>
+        )}
+
+        {mode === "manual" && (
+          <div className="space-y-3">
+            <input className="inp" placeholder="Activity (e.g. Evening walk)" value={manual.label} onChange={(e) => setManual({ ...manual, label: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Calories burned" value={manual.calories} onChange={(v) => setManual({ ...manual, calories: v })} />
+              <Field label="Minutes (optional)" value={manual.minutes} onChange={(v) => setManual({ ...manual, minutes: v })} />
+            </div>
+            <button className="btn-primary w-full" disabled={!manual.calories || busy}
+              onClick={() => save({ label: manual.label.trim() || "Activity", calories: num(manual.calories), minutes: num(manual.minutes), source: "manual" })}>
+              {busy ? "Saving…" : "Add to today"}
+            </button>
+          </div>
+        )}
+
+        {err && <p className="text-sm text-ember">{err}</p>}
+
+        {result && (
+          <div className="space-y-3 rounded-2xl border border-line p-3">
+            <p className="eyebrow">Estimate — edit if you want</p>
+            <input className="inp" value={result.label} onChange={(e) => setResult({ ...result, label: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Calories" value={result.calories} onChange={(v) => setResult({ ...result, calories: num(v) })} />
+              <Field label="Minutes" value={result.minutes ?? ""} onChange={(v) => setResult({ ...result, minutes: num(v) })} />
+            </div>
+            <p className="text-[11px] text-muted">AI estimate — training burns are easy to overestimate, so treat it as a rough number.</p>
+            <button className="btn-primary w-full" disabled={busy}
+              onClick={() => save({ label: result.label || "Activity", calories: num(result.calories) || 0, minutes: num(result.minutes), source: result.source === "workout" ? "workout" : "ai" })}>
+              {busy ? "Saving…" : "Add " + Math.round(result.calories || 0) + " kcal"}
+            </button>
+          </div>
+        )}
+      </div>
+    </Sheet>
   );
 }

@@ -5,7 +5,7 @@ export function currentTheme() {
   try { const t = localStorage.getItem(KEY); return THEMES.includes(t) ? t : "dark"; } catch { return "dark"; }
 }
 
-const BAR = { dark: "#12101A", light: "#F5F6F9", bloom: "#FAF6EE" };
+const BAR = { dark: "#12101A", light: "#F5F6F9", bloom: "#F8F7F3" };
 
 export function applyTheme(theme) {
   const root = document.documentElement;

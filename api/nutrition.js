@@ -13,6 +13,7 @@ export default async function handler(req, res) {
   try {
     if (mode === "label") return await labelScan(b, key, res);
     if (mode === "assist") return await assist(b, key, res);
+    if (mode === "burn") return await burn(b, key, res);
     return await estimate(b, key, res);
   } catch (e) {
     return res.status(500).json({ error: "AI request failed." });
@@ -89,6 +90,30 @@ async function assist(b, key, res) {
   const text = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").trim();
   if (!text) return res.status(200).json({ ok: false, error: "No answer - try rephrasing." });
   return res.status(200).json({ ok: true, answer: text });
+}
+
+async function burn(b, key, res) {
+  const activity = (b.activity || "").toString().slice(0, 400).trim();
+  const w = b.weightKg ? Number(b.weightKg) : null;
+  const wk = b.workout || null;
+  if (!activity && !(wk && (wk.count || wk.minutes))) return res.status(400).json({ error: "Nothing to estimate." });
+  const desc = activity || [
+    wk.minutes ? "Gym session of about " + wk.minutes + " minutes." : "",
+    wk.count ? "Exercises logged: " + (wk.exercises || []).slice(0, 12).join("; ") + "." : "",
+  ].filter(Boolean).join(" ");
+  const prompt = [
+    "Estimate the calories burned for this activity. Be realistic and conservative - resistance training burns far less than people assume, and do NOT include basal metabolism, only the activity itself.",
+    w ? "The person weighs about " + Math.round(w) + " kg." : "Assume an average adult (75 kg).",
+    "Return ONLY compact JSON: {\"calories\":<int>,\"label\":<short 2-4 word name>,\"minutes\":<int or null>}. No markdown, no words.",
+    "", "ACTIVITY: " + desc,
+  ].join("\n");
+  const r = await gemini(key, [{ text: prompt }], 120);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const data = await r.json();
+  const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
+  const p = safeParse(t);
+  if (!p || p.calories == null) return res.status(200).json({ ok: false, error: "Couldn't estimate that. Try describing it differently." });
+  return res.status(200).json({ ok: true, calories: int(p.calories), label: (p.label || "Activity").toString().slice(0, 40), minutes: p.minutes == null ? null : int(p.minutes) });
 }
 
 function int(v) { return Math.max(0, Math.round(Number(v) || 0)); }

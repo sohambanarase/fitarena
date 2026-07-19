@@ -323,3 +323,29 @@ export async function loadMyFoods(userId, q) {
   const { data } = await query.order("created_at", { ascending: false }).limit(100);
   return data || [];
 }
+
+// ---- Calories burned (activity log) ----
+export async function loadBurn(userId, date) {
+  const { data } = await supabase.from("activity_logs").select("*").eq("user_id", userId).eq("log_date", date).order("created_at", { ascending: true });
+  return data || [];
+}
+export async function addBurn(userId, date, entry) {
+  return supabase.from("activity_logs").insert({ user_id: userId, log_date: date, ...entry }).select().single();
+}
+export async function removeBurn(id) { return supabase.from("activity_logs").delete().eq("id", id); }
+export function burnTotal(rows) { return (rows || []).reduce((n, r) => n + (Number(r.calories) || 0), 0); }
+
+// Today's gym work, summarised for the AI burn estimate.
+export async function workoutSummary(userId, date) {
+  const [{ data: entries }, { data: sessions }] = await Promise.all([
+    supabase.from("workout_entries").select("exercise, sets_detail").eq("user_id", userId).eq("log_date", date),
+    supabase.from("workout_sessions").select("seconds").eq("user_id", userId).eq("log_date", date),
+  ]);
+  const minutes = Math.round(((sessions || []).reduce((n, s) => n + (s.seconds || 0), 0)) / 60);
+  const list = (entries || []).map((e) => {
+    const sets = e.sets_detail || [];
+    const top = sets.reduce((m, s) => Math.max(m, Number(s.weight) || 0), 0);
+    return e.exercise + " " + sets.length + " sets" + (top ? " @ " + top + "kg" : "");
+  });
+  return { minutes, exercises: list, count: list.length };
+}
