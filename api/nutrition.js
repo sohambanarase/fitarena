@@ -1,10 +1,7 @@
 // /api/nutrition.js — Gemini-backed nutrition helper.
 // modes: "estimate" (meal text -> macros), "label" (label photo -> per-100g macros),
 //        "assist" (question + today's context -> short answer).
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";   // override in Vercel env if needed
-const FALLBACK_MODEL = "gemini-2.5-flash";                              // used automatically if the above is unavailable
-const url = (m) => "https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent";
-const ENDPOINT = url(MODEL);
+import { generate } from "./_gemini.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -23,12 +20,7 @@ export default async function handler(req, res) {
 }
 
 async function gemini(key, parts, maxTokens, temp) {
-  const body = JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: temp == null ? 0.3 : temp, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } } });
-  const opts = { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body };
-  let r = await fetch(ENDPOINT, opts);
-  // if the preferred model isn't available to this key, fall back automatically
-  if ((r.status === 404 || r.status === 403 || r.status === 400) && MODEL !== FALLBACK_MODEL) r = await fetch(url(FALLBACK_MODEL), opts);
-  return r;
+  return generate(key, { parts, maxOutputTokens: maxTokens, temperature: temp == null ? 0.3 : temp });
 }
 
 async function estimate(b, key, res) {
