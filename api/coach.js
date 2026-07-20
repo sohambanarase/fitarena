@@ -3,8 +3,10 @@
 // Keeps GEMINI_API_KEY server-side. The browser sends only a stats payload.
 // ============================================================
 
-const MODEL = "gemini-2.5-flash"; // free-tier eligible. Swap to "gemini-3.5-flash" (paid) anytime.
-const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";   // override in Vercel env if needed
+const FALLBACK_MODEL = "gemini-2.5-flash";                              // used automatically if the above is unavailable
+const url = (m) => "https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent";
+const ENDPOINT = url(MODEL);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -50,11 +52,14 @@ export default async function handler(req, res) {
       ].join("\n");
 
   try {
-    const r = await fetch(ENDPOINT, {
+    const opts = {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: question ? 0.6 : 0.75, maxOutputTokens: 360, thinkingConfig: { thinkingBudget: 0 } } }),
-    });
+    };
+    let r = await fetch(ENDPOINT, opts);
+    // if the preferred model isn't available to this key, fall back automatically
+    if ((r.status === 404 || r.status === 403 || r.status === 400) && MODEL !== FALLBACK_MODEL) r = await fetch(url(FALLBACK_MODEL), opts);
 
     if (r.status === 429) {
       const detail = await r.text();

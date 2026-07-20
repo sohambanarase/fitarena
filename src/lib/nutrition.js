@@ -349,3 +349,41 @@ export async function workoutSummary(userId, date) {
   });
   return { minutes, exercises: list, count: list.length };
 }
+
+// ---- Saved meal editing ----
+export async function updateSavedMeal(id, patch) {
+  return supabase.from("saved_meals").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+}
+export async function addSavedMealItem(mealId, foodId, grams) {
+  return supabase.from("saved_meal_items").insert({ saved_meal_id: mealId, food_id: foodId, quantity: grams, quantity_unit: "g", quantity_grams: grams }).select().single();
+}
+export async function updateSavedMealItem(id, grams) {
+  return supabase.from("saved_meal_items").update({ quantity: grams, quantity_grams: grams }).eq("id", id);
+}
+export async function deleteSavedMealItem(id) { return supabase.from("saved_meal_items").delete().eq("id", id); }
+
+// ---- Day-by-day series for the insights charts ----
+export async function loadBurnRange(userId, sinceISO) {
+  const { data } = await supabase.from("activity_logs").select("log_date, calories").eq("user_id", userId).gte("log_date", sinceISO);
+  return data || [];
+}
+// Returns one row per day (oldest first) with eaten / burned / net calories and protein.
+export function dailySeries(foodRows, burnRows, days = 7) {
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000);
+    const iso = d.toISOString().slice(0, 10);
+    const eaten = (foodRows || []).filter((r) => r.log_date === iso).reduce((n, r) => n + (Number(r.calculated_calories) || 0), 0);
+    const protein = (foodRows || []).filter((r) => r.log_date === iso).reduce((n, r) => n + (Number(r.calculated_protein) || 0), 0);
+    const burned = (burnRows || []).filter((r) => r.log_date === iso).reduce((n, r) => n + (Number(r.calories) || 0), 0);
+    out.push({ iso, day: d.toLocaleDateString(undefined, { weekday: "short" })[0], eaten: Math.round(eaten), burned: Math.round(burned), net: Math.round(eaten - burned), protein: Math.round(protein) });
+  }
+  return out;
+}
+// ~7700 kcal per kg of body fat.
+export function projectedWeeklyChangeKg(series, maintenance) {
+  const logged = series.filter((d) => d.eaten > 0);
+  if (!logged.length || !maintenance) return null;
+  const avgDelta = logged.reduce((n, d) => n + (d.net - maintenance), 0) / logged.length;
+  return Math.round((avgDelta * 7 / 7700) * 100) / 100;
+}

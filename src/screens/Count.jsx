@@ -15,8 +15,10 @@ import {
   loadQuickFoods, builtinQuickFoods, addQuickFood, updateFoodRow, deleteFoodRow, hideDefaultQuick, restoreDefaultQuick, hiddenDefaultCount,
   getFood, updateLog, loadMyFoods,
   loadBurn, addBurn, removeBurn, burnTotal, workoutSummary,
+  updateSavedMeal, addSavedMealItem, updateSavedMealItem, deleteSavedMealItem,
+  loadBurnRange, dailySeries, projectedWeeklyChangeKg,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell, Scale } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 
@@ -60,6 +62,8 @@ export default function Count() {
   const [editLog, setEditLog] = useState(null);
   const [burn, setBurn] = useState([]);
   const [showBurn, setShowBurn] = useState(false);
+  const [series, setSeries] = useState([]);
+  const [showStats, setShowStats] = useState(false);
   const isToday = date === today;
   const shiftDay = (d) => setDate(toISO(new Date(new Date(date + "T00:00:00").getTime() + d * 86400000)));
   const dayLabel = isToday ? "Today" : new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -67,8 +71,11 @@ export default function Count() {
   const load = useCallback(async () => {
     setLoading(true);
     const since = toISO(new Date(Date.now() - 6 * 86400000));
-    const [g, l, range, bn] = await Promise.all([loadGoals(user.id), loadLogs(user.id, date), loadRange(user.id, since), loadBurn(user.id, date)]);
-    setGoals(g); setLogs(l); setInsights(weeklyInsights(range, g)); setBurn(bn); setLoading(false);
+    const [g, l, range, bn, burnRange] = await Promise.all([
+      loadGoals(user.id), loadLogs(user.id, date), loadRange(user.id, since), loadBurn(user.id, date), loadBurnRange(user.id, since),
+    ]);
+    setGoals(g); setLogs(l); setInsights(weeklyInsights(range, g)); setBurn(bn);
+    setSeries(dailySeries(range, burnRange, 7)); setLoading(false);
   }, [user.id, date]);
   useEffect(() => { load(); }, [load]);
 
@@ -111,7 +118,7 @@ export default function Count() {
       {loading ? <Loader label="Loading your day…" /> : (
         <>
           {/* hero: calories ring + protein prioritized */}
-          <div className="card">
+          <div className="card" onClick={() => (calGoal || goals?.protein_goal) && setShowStats(true)} role={calGoal ? "button" : undefined}>
             {!calGoal && !goals?.protein_goal ? (
               <button onClick={() => setShowGoals(true)} className="w-full py-2 text-center">
                 <p className="font-bold">Set your goals to get started</p>
@@ -137,6 +144,15 @@ export default function Count() {
                   <MacroBar label="Fat" value={t.fat} goal={goals?.fat_goal} color="var(--grad-ember)" />
                 </div>
               </div>
+            )}
+
+            {(calGoal || goals?.maintenance_calories) && (
+              <>
+                <MaintenanceStrip eaten={t.calories} burned={burned} goal={calGoal} maintenance={goals?.maintenance_calories} />
+                <div className="mt-2 flex items-center justify-center gap-1 text-[11px] font-bold text-muted">
+                  Tap for trends <ChevronRight size={12} />
+                </div>
+              </>
             )}
           </div>
 
@@ -228,6 +244,7 @@ export default function Count() {
       {showGoals && <GoalsSheet userId={user.id} goals={goals} onClose={() => setShowGoals(false)} onSaved={load} />}
       {add && <AddFoodSheet userId={user.id} date={date} initial={add} goals={goals} totals={t} onClose={() => setAdd(null)} onLogged={load} />}
       {editLog && <EditLogSheet userId={user.id} entry={editLog} onClose={() => setEditLog(null)} onSaved={load} />}
+      {showStats && <StatsSheet series={series} goals={goals} today={{ eaten: t.calories, burned, protein: t.protein }} onClose={() => setShowStats(false)} />}
       {showBurn && <BurnSheet userId={user.id} date={date} weightKg={profile?.current_weight_kg} onClose={() => setShowBurn(false)} onSaved={load} />}
     </div>
   );
@@ -236,7 +253,7 @@ export default function Count() {
 /* ---------- Goals ---------- */
 function GoalsSheet({ userId, goals, onClose, onSaved }) {
   const [f, setF] = useState({
-    calories_goal: goals?.calories_goal || "", protein_goal: goals?.protein_goal || "",
+    calories_goal: goals?.calories_goal || "", protein_goal: goals?.protein_goal || "", maintenance_calories: goals?.maintenance_calories || "",
     carbs_goal: goals?.carbs_goal || "", fat_goal: goals?.fat_goal || "", goal_type: goals?.goal_type || "maintain",
   });
   const [busy, setBusy] = useState(false);
@@ -252,7 +269,17 @@ function GoalsSheet({ userId, goals, onClose, onSaved }) {
             ))}
           </div>
         </div>
-        <Field label="Calories (kcal)" value={f.calories_goal} onChange={(v) => set("calories_goal", v)} />
+        <Field label="Maintenance calories (what keeps you the same)" value={f.maintenance_calories} onChange={(v) => set("maintenance_calories", v)} />
+        <Field label="Daily goal calories (what you're aiming for)" value={f.calories_goal} onChange={(v) => set("calories_goal", v)} />
+        {f.maintenance_calories && f.calories_goal ? (
+          <p className="-mt-1 text-[11px] text-muted">
+            {Number(f.calories_goal) < Number(f.maintenance_calories)
+              ? Math.round(f.maintenance_calories - f.calories_goal) + " kcal below maintenance — roughly " + (Math.round(((f.maintenance_calories - f.calories_goal) * 7 / 7700) * 100) / 100) + " kg fat loss per week."
+              : Number(f.calories_goal) > Number(f.maintenance_calories)
+                ? Math.round(f.calories_goal - f.maintenance_calories) + " kcal above maintenance — a lean-gain pace of about " + (Math.round(((f.calories_goal - f.maintenance_calories) * 7 / 7700) * 100) / 100) + " kg per week."
+                : "Goal matches maintenance — you'll hold your current weight."}
+          </p>
+        ) : null}
         <Field label="Protein (g) ★" value={f.protein_goal} onChange={(v) => set("protein_goal", v)} />
         <div className="grid grid-cols-2 gap-2">
           <Field label="Carbs (g)" value={f.carbs_goal} onChange={(v) => set("carbs_goal", v)} />
@@ -260,7 +287,7 @@ function GoalsSheet({ userId, goals, onClose, onSaved }) {
         </div>
         <button className="btn-primary w-full" disabled={busy} onClick={async () => {
           setBusy(true);
-          await saveGoals(userId, { calories_goal: num(f.calories_goal), protein_goal: num(f.protein_goal), carbs_goal: num(f.carbs_goal), fat_goal: num(f.fat_goal), goal_type: f.goal_type });
+          await saveGoals(userId, { calories_goal: num(f.calories_goal), maintenance_calories: num(f.maintenance_calories), protein_goal: num(f.protein_goal), carbs_goal: num(f.carbs_goal), fat_goal: num(f.fat_goal), goal_type: f.goal_type });
           setBusy(false); onSaved(); onClose();
         }}>{busy ? "Saving…" : "Save goals"}</button>
       </div>
@@ -756,6 +783,7 @@ function SavedMealsView({ userId, date, meal, setMeal, onLogged }) {
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
 
   if (mode === "create") return <CreateSavedMeal userId={userId} onDone={() => { setMode("list"); reload(); }} onCancel={() => setMode("list")} />;
+  if (mode && mode.edit) return <EditSavedMeal userId={userId} meal={mode.edit} onDone={() => { setMode("list"); reload(); }} onCancel={() => setMode("list")} />;
 
   return (
     <div className="space-y-3">
@@ -776,7 +804,8 @@ function SavedMealsView({ userId, date, meal, setMeal, onLogged }) {
                     <p className="text-[11px] text-muted">{m.items.length} item{m.items.length !== 1 ? "s" : ""} · {Math.round(t.cal)} kcal · {Math.round(t.p)}g P</p>
                   </div>
                   <button onClick={async () => { await logSavedMeal(userId, date, meal, m); onLogged(); }} className="btn-primary px-3 py-2 text-sm">Log</button>
-                  <button onClick={async () => { await deleteSavedMeal(m.id); reload(); }} className="text-muted active:scale-90 hover:text-ember"><Trash2 size={16} /></button>
+                  <button onClick={() => setMode({ edit: m })} aria-label="Edit meal" className="text-muted active:scale-90"><Pencil size={15} /></button>
+                  <button onClick={async () => { await deleteSavedMeal(m.id); reload(); }} aria-label="Delete meal" className="text-muted active:scale-90 hover:text-ember"><Trash2 size={16} /></button>
                 </div>
               );
             })}
@@ -1097,5 +1126,185 @@ function BurnSheet({ userId, date, weightKg, onClose, onSaved }) {
         )}
       </div>
     </Sheet>
+  );
+}
+
+/* ---------- Maintenance vs goal strip ---------- */
+function MaintenanceStrip({ eaten, burned, goal, maintenance }) {
+  const net = eaten - burned;
+  const scaleMax = Math.max(goal || 0, maintenance || 0, net) * 1.12 || 1;
+  const pct = (v) => Math.max(0, Math.min(100, (v / scaleMax) * 100));
+  const overGoal = goal ? net > goal : false;
+  const vsMaint = maintenance ? Math.round(net - maintenance) : null;
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <div className="relative h-3 w-full overflow-hidden rounded-full bg-surface2">
+        <div className="absolute inset-y-0 left-0 rounded-full transition-all"
+          style={{ width: pct(net) + "%", background: overGoal ? "var(--grad-ember)" : "var(--grad-gold)" }} />
+        {goal ? <div className="absolute inset-y-0 w-0.5 bg-paper/70" style={{ left: pct(goal) + "%" }} title="Goal" /> : null}
+        {maintenance ? <div className="absolute inset-y-[-3px] w-0.5" style={{ left: pct(maintenance) + "%", background: "rgb(var(--c-mint))" }} title="Maintenance" /> : null}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px]">
+        <span className="font-bold">{Math.round(net)} kcal net</span>
+        <span className="flex items-center gap-2 text-muted">
+          {goal ? <span><span className="mr-1 inline-block h-2 w-0.5 translate-y-[1px] bg-paper/70" />goal {goal}</span> : null}
+          {maintenance ? <span><span className="mr-1 inline-block h-2 w-0.5 translate-y-[1px]" style={{ background: "rgb(var(--c-mint))" }} />maint {maintenance}</span> : null}
+        </span>
+      </div>
+      {vsMaint != null && (
+        <p className="mt-1 text-[11px] font-semibold" style={{ color: vsMaint < 0 ? "rgb(var(--c-mint))" : vsMaint > 0 ? "rgb(var(--c-ember))" : undefined }}>
+          {vsMaint < 0 ? Math.abs(vsMaint) + " kcal under maintenance — losing" : vsMaint > 0 ? "+" + vsMaint + " kcal over maintenance — gaining" : "At maintenance"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Stats / trends modal ---------- */
+function StatsSheet({ series, goals, today, onClose }) {
+  const goal = goals?.calories_goal || 0;
+  const maint = goals?.maintenance_calories || 0;
+  const logged = series.filter((d) => d.eaten > 0);
+  const avgNet = logged.length ? Math.round(logged.reduce((n, d) => n + d.net, 0) / logged.length) : 0;
+  const avgProtein = logged.length ? Math.round(logged.reduce((n, d) => n + d.protein, 0) / logged.length) : 0;
+  const proteinHit = goals?.protein_goal ? logged.filter((d) => d.protein >= goals.protein_goal).length : null;
+  const kgWeek = projectedWeeklyChangeKg(series, maint);
+  const max = Math.max(goal, maint, ...series.map((d) => d.net), 1) * 1.15;
+  const H = 130;
+  const y = (v) => H - (v / max) * H;
+
+  return (
+    <Sheet title="Your trends" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <p className="eyebrow mb-2">Last 7 days · net calories</p>
+          <div className="rounded-2xl bg-surface2 p-3">
+            <svg viewBox={`0 0 280 ${H + 22}`} className="w-full" style={{ overflow: "visible" }}>
+              {maint > 0 && (
+                <>
+                  <line x1="0" x2="280" y1={y(maint)} y2={y(maint)} stroke="rgb(var(--c-mint))" strokeWidth="1.5" strokeDasharray="2 3" />
+                  <text x="280" y={y(maint) - 3} textAnchor="end" fontSize="8" fill="rgb(var(--c-mint))">maint {maint}</text>
+                </>
+              )}
+              {goal > 0 && (
+                <>
+                  <line x1="0" x2="280" y1={y(goal)} y2={y(goal)} stroke="rgb(var(--c-paper))" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.55" />
+                  <text x="280" y={y(goal) - 3} textAnchor="end" fontSize="8" fill="rgb(var(--c-muted))">goal {goal}</text>
+                </>
+              )}
+              {series.map((d, i) => {
+                const w = 26, gap = 14, x = i * (w + gap) + 6;
+                const over = goal > 0 && d.net > goal;
+                return (
+                  <g key={d.iso}>
+                    <rect x={x} y={d.net > 0 ? y(d.net) : H} width={w} height={d.net > 0 ? H - y(d.net) : 0} rx="5"
+                      fill={over ? "rgb(var(--c-ember))" : "rgb(var(--c-gold))"} opacity={d.net > 0 ? 0.9 : 0.2} />
+                    {d.net === 0 && <rect x={x} y={H - 3} width={w} height="3" rx="1.5" fill="rgb(var(--c-line))" />}
+                    <text x={x + w / 2} y={H + 12} textAnchor="middle" fontSize="9" fill="rgb(var(--c-muted))">{d.day}</text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted">Net = what you ate minus what you burned. Bars turn coral on days above your goal.</p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="panel py-3"><p className="font-score text-lg font-bold">{avgNet}</p><p className="text-[10px] text-muted">avg net kcal</p></div>
+          <div className="panel py-3"><p className="font-score text-lg font-bold text-mint">{avgProtein}</p><p className="text-[10px] text-muted">avg protein</p></div>
+          <div className="panel py-3"><p className="font-score text-lg font-bold">{logged.length}</p><p className="text-[10px] text-muted">days logged</p></div>
+        </div>
+
+        {maint > 0 && (
+          <div className="card">
+            <p className="eyebrow mb-1 flex items-center gap-1"><Scale size={12} /> Pace</p>
+            {kgWeek == null ? <p className="text-sm text-muted">Log a few days to see your pace.</p> : (
+              <>
+                <p className="text-sm">
+                  You're averaging <span className="font-bold">{Math.abs(avgNet - maint)} kcal {avgNet < maint ? "below" : "above"}</span> maintenance.
+                </p>
+                <p className="mt-1 font-score text-2xl font-bold" style={{ color: kgWeek < 0 ? "rgb(var(--c-mint))" : "rgb(var(--c-ember))" }}>
+                  {kgWeek > 0 ? "+" : ""}{kgWeek} kg / week
+                </p>
+                <p className="mt-1 text-[11px] text-muted">Rough projection from your logged days (~7,700 kcal per kg). Real weight moves with water and food volume too, so judge it over 2–3 weeks.</p>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="panel">
+          <p className="eyebrow mb-1.5">Protein</p>
+          <p className="text-sm">Today: <span className="font-bold text-mint">{Math.round(today.protein)}g</span>{goals?.protein_goal ? " of " + goals.protein_goal + "g" : ""}</p>
+          {proteinHit != null && <p className="mt-1 text-[12px] text-muted">Goal hit on {proteinHit} of {logged.length} logged day{logged.length !== 1 ? "s" : ""} this week.</p>}
+        </div>
+
+        {!maint && <p className="text-[11px] text-muted">Add your maintenance calories in goals (the gear icon) to see deficit, surplus and weekly pace.</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+/* ---------- Edit an existing saved meal ---------- */
+function EditSavedMeal({ userId, meal, onDone, onCancel }) {
+  const [name, setName] = useState(meal.meal_name || "");
+  const [items, setItems] = useState(meal.items || []);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function addItem(food) {
+    let f = food;
+    if (!f.id) f = await ensureFood(userId, food);
+    const grams = f.serving_size ? Number(f.serving_size) : 100;
+    const { data } = await addSavedMealItem(meal.id, f.id, grams);
+    setItems((prev) => [...prev, { ...(data || { id: "tmp" + Date.now(), quantity_grams: grams }), food: f }]);
+    setAdding(false);
+  }
+  async function setGrams(item, grams) {
+    setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, quantity_grams: grams } : x)));
+    await updateSavedMealItem(item.id, grams);
+  }
+  async function removeItem(item) {
+    setItems((prev) => prev.filter((x) => x.id !== item.id));
+    await deleteSavedMealItem(item.id);
+  }
+
+  const totals = items.reduce((t, it) => {
+    if (!it.food) return t;
+    const m = macrosFor(it.food, it.quantity_grams || 100);
+    return { cal: t.cal + (m.calories || 0), p: t.p + (m.protein || 0) };
+  }, { cal: 0, p: 0 });
+
+  if (adding) return (
+    <div className="space-y-2">
+      <button onClick={() => setAdding(false)} className="pill">← Back</button>
+      <FoodPickerInline userId={userId} onPick={addItem} />
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <button onClick={onCancel} className="pill">← Saved meals</button>
+      <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="Meal name" />
+      <p className="eyebrow">{Math.round(totals.cal)} kcal · {Math.round(totals.p)}g protein</p>
+      <div className="space-y-2">
+        {items.map((it) => (
+          <div key={it.id} className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm font-bold capitalize">{it.food?.name || "Removed food"}</span>
+            <input className="w-16 rounded-lg bg-surface px-2 py-1.5 text-center text-paper outline-none" inputMode="decimal"
+              value={it.quantity_grams ?? ""} onChange={(e) => setGrams(it, Number(e.target.value) || 0)} />
+            <span className="text-[11px] text-muted">g</span>
+            <button onClick={() => removeItem(it)} aria-label="Remove item" className="text-muted active:scale-90 hover:text-ember"><X size={16} /></button>
+          </div>
+        ))}
+        {items.length === 0 && <p className="text-sm text-muted">No items yet — add one below.</p>}
+      </div>
+      <button onClick={() => setAdding(true)} className="pill flex w-full items-center justify-center gap-1 py-2.5"><Plus size={14} /> Add food</button>
+      <button className="btn-primary w-full" disabled={busy || !name.trim()}
+        onClick={async () => { setBusy(true); await updateSavedMeal(meal.id, { meal_name: name.trim() }); setBusy(false); onDone(); }}>
+        {busy ? "Saving…" : "Save meal"}
+      </button>
+      <p className="text-[11px] text-muted">Item changes save as you make them.</p>
+    </div>
   );
 }

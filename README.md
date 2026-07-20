@@ -586,3 +586,20 @@ burns are easy to overestimate.
 ### Bloom, recoloured
 Ocean blues (deep navy → sea blue) with soft summer washes: peach, aqua, sand-yellow, seafoam and a
 touch of periwinkle. Contrast re-checked: body text 13.6:1, accents 4.1–5.2:1.
+
+---
+
+## v13 — saved-meal editing, maintenance vs goal, trends modal, Gemini 3.5 Flash
+
+**Database step:** run `supabase/migration_v13.sql` (adds `maintenance_calories`). Then push.
+
+- **Saved meals are editable**: rename a meal, change any item's grams, remove items, and add new
+  foods to an existing meal. Item changes save as you make them.
+- **Maintenance vs goal calories**: goals now hold both. The dashboard shows a bar with your net
+  calories, a marker for your goal and a marker for maintenance, plus a live "X kcal under/over
+  maintenance" read-out. Setting the goals also tells you the implied weekly pace.
+- **Tap the calorie card → trends modal**: a 7-day net-calorie chart with goal and maintenance
+  reference lines (bars turn coral above goal), averages, days logged, protein-goal hit rate, and a
+  projected kg/week based on your average deficit or surplus.
+- **Model updated to Gemini 3.5 Flash** (released at Google I/O, May 2026) with an automatic fallback
+  to 2.5 Flash if the key can't use it. Set `GEMINI_MODEL` in Vercel to pin a specific model.
