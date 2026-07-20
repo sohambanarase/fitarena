@@ -21,6 +21,7 @@ import {
 import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell, Scale } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
+const GOAL_BAND = 0.10;   // ±10% counts as hitting the goal
 
 /* progress ring */
 function Ring({ value, goal, size = 128, stroke = 11, color = "rgb(var(--c-gold))", children }) {
@@ -1132,23 +1133,35 @@ function BurnSheet({ userId, date, weightKg, onClose, onSaved }) {
 /* ---------- Maintenance vs goal strip ---------- */
 function MaintenanceStrip({ eaten, burned, goal, maintenance }) {
   const net = eaten - burned;
-  const scaleMax = Math.max(goal || 0, maintenance || 0, net) * 1.12 || 1;
+  const lo = goal ? goal * (1 - GOAL_BAND) : 0;          // on-target band
+  const hi = goal ? goal * (1 + GOAL_BAND) : 0;
+  const scaleMax = Math.max(hi, maintenance || 0, net) * 1.1 || 1;
   const pct = (v) => Math.max(0, Math.min(100, (v / scaleMax) * 100));
-  const overGoal = goal ? net > goal : false;
+  const overGoal = goal ? net > hi : false;
+  const onTarget = goal ? net >= lo && net <= hi : false;
   const vsMaint = maintenance ? Math.round(net - maintenance) : null;
 
   return (
     <div className="mt-3 border-t border-line pt-3">
       <div className="relative h-3 w-full overflow-hidden rounded-full bg-surface2">
+        {goal ? (
+          <div className="absolute inset-y-0 rounded-sm" title="On-target range"
+            style={{ left: pct(lo) + "%", width: (pct(hi) - pct(lo)) + "%", background: "rgb(var(--c-mint) / .22)" }} />
+        ) : null}
         <div className="absolute inset-y-0 left-0 rounded-full transition-all"
-          style={{ width: pct(net) + "%", background: overGoal ? "var(--grad-ember)" : "var(--grad-gold)" }} />
+          style={{ width: pct(net) + "%", background: overGoal ? "var(--grad-ember)" : "var(--grad-gold)", opacity: 0.92 }} />
         {goal ? <div className="absolute inset-y-0 w-0.5 bg-paper/70" style={{ left: pct(goal) + "%" }} title="Goal" /> : null}
         {maintenance ? <div className="absolute inset-y-[-3px] w-0.5" style={{ left: pct(maintenance) + "%", background: "rgb(var(--c-mint))" }} title="Maintenance" /> : null}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px]">
-        <span className="font-bold">{Math.round(net)} kcal net</span>
+        <span className="font-bold">
+          {Math.round(net)} kcal net
+          {goal ? <span className={"ml-1.5 font-semibold " + (onTarget ? "text-mint" : overGoal ? "text-ember" : "text-muted")}>
+            {onTarget ? "· on target" : overGoal ? "· over" : "· under"}
+          </span> : null}
+        </span>
         <span className="flex items-center gap-2 text-muted">
-          {goal ? <span><span className="mr-1 inline-block h-2 w-0.5 translate-y-[1px] bg-paper/70" />goal {goal}</span> : null}
+          {goal ? <span><span className="mr-1 inline-block h-2 w-0.5 translate-y-[1px] bg-paper/70" />goal {Math.round(lo)}–{Math.round(hi)}</span> : null}
           {maintenance ? <span><span className="mr-1 inline-block h-2 w-0.5 translate-y-[1px]" style={{ background: "rgb(var(--c-mint))" }} />maint {maintenance}</span> : null}
         </span>
       </div>
@@ -1170,7 +1183,8 @@ function StatsSheet({ series, goals, today, onClose }) {
   const avgProtein = logged.length ? Math.round(logged.reduce((n, d) => n + d.protein, 0) / logged.length) : 0;
   const proteinHit = goals?.protein_goal ? logged.filter((d) => d.protein >= goals.protein_goal).length : null;
   const kgWeek = projectedWeeklyChangeKg(series, maint);
-  const max = Math.max(goal, maint, ...series.map((d) => d.net), 1) * 1.15;
+  const lo = goal * (1 - GOAL_BAND), hi = goal * (1 + GOAL_BAND);
+  const max = Math.max(hi, maint, ...series.map((d) => d.net), 1) * 1.15;
   const H = 130;
   const y = (v) => H - (v / max) * H;
 
@@ -1189,13 +1203,14 @@ function StatsSheet({ series, goals, today, onClose }) {
               )}
               {goal > 0 && (
                 <>
+                  <rect x="0" y={y(hi)} width="280" height={Math.max(0, y(lo) - y(hi))} fill="rgb(var(--c-mint))" opacity="0.14" rx="3" />
                   <line x1="0" x2="280" y1={y(goal)} y2={y(goal)} stroke="rgb(var(--c-paper))" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.55" />
-                  <text x="280" y={y(goal) - 3} textAnchor="end" fontSize="8" fill="rgb(var(--c-muted))">goal {goal}</text>
+                  <text x="280" y={y(hi) - 3} textAnchor="end" fontSize="8" fill="rgb(var(--c-muted))">goal {Math.round(lo)}–{Math.round(hi)}</text>
                 </>
               )}
               {series.map((d, i) => {
                 const w = 26, gap = 14, x = i * (w + gap) + 6;
-                const over = goal > 0 && d.net > goal;
+                const over = goal > 0 && d.net > hi;
                 return (
                   <g key={d.iso}>
                     <rect x={x} y={d.net > 0 ? y(d.net) : H} width={w} height={d.net > 0 ? H - y(d.net) : 0} rx="5"
@@ -1207,7 +1222,7 @@ function StatsSheet({ series, goals, today, onClose }) {
               })}
             </svg>
           </div>
-          <p className="mt-1.5 text-[11px] text-muted">Net = what you ate minus what you burned. Bars turn coral on days above your goal.</p>
+          <p className="mt-1.5 text-[11px] text-muted">Net = what you ate minus what you burned. The green band is your goal ±{Math.round(GOAL_BAND * 100)}% — anything inside counts as on target; bars turn coral above it.</p>
         </div>
 
         <div className="grid grid-cols-3 gap-2 text-center">
