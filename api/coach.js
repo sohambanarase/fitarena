@@ -56,11 +56,14 @@ export default async function handler(req, res) {
       const m = detail.match(/retry in ([\d.]+)s/i);
       return res.status(429).json({ rateLimited: true, retryAfter: m ? Math.ceil(parseFloat(m[1])) : 60 });
     }
-    if (!r.ok) return res.status(502).json({ error: "Gemini error", detail: (await r.text()).slice(0, 400) });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => "");
+      return res.status(502).json({ error: "Gemini error", model: r.modelUsed || "unknown", status: r.status, detail: detail.slice(0, 300) });
+    }
 
     const data = await r.json();
     const text = (data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "").trim()
-      || "Coach is speechless. Go log a workout and check back.";
+      || "Coach came back empty this time — tap refresh to try again.";
     res.setHeader("Cache-Control", "s-maxage=30");
     return res.status(200).json({ message: text, tone: mood });
   } catch (e) {
