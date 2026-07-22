@@ -8,6 +8,7 @@ import {
   loadCustomExercises, addCustomExercise, updateEntry,
   saveSession, loadSessionSeconds,
 } from "../lib/grind.js";
+import { loadTimerPrefs } from "../lib/timerPrefs.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
@@ -86,6 +87,16 @@ export default function Grind() {
   const [tab, setTab] = useState("log"); // log | planner
   const [goals, setGoals] = useState([]);
   const [entries, setEntries] = useState([]);
+  const lastByExercise = useMemo(() => {
+    // entries arrive newest-first; keep the first past-day occurrence of each exercise
+    const map = {};
+    for (const e of entries) {
+      if (e.log_date === date) continue;
+      const key = e.exercise.toLowerCase();
+      if (!map[key]) map[key] = { date: e.log_date, sets: setsOf(e) };
+    }
+    return map;
+  }, [entries, date]);
   const [plans, setPlans] = useState([]);
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +118,11 @@ export default function Grind() {
     try { localStorage.removeItem("fitarena.session"); } catch {}
     setSessionStart(null);
     if (startedAt) { await saveSession(user.id, (Date.now() - startedAt) / 1000); refreshSessions(); }
+  };
+  const editSession = (seconds) => {
+    const t = Date.now() - Math.max(0, seconds) * 1000;   // shift the start so the clock reads `seconds`
+    setSessionStart(t);
+    try { localStorage.setItem("fitarena.session", String(t)); } catch {}
   };
   const planStartIndex = useCallback((plan) => {
     const done = new Set(entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase()));
@@ -146,7 +162,7 @@ export default function Grind() {
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
 
-      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} loggedSecs={daySeconds} />
+      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} loggedSecs={daySeconds} />
 
       {/* Log / Planner switch */}
       <div className="glass grid grid-cols-2 gap-1 rounded-2xl p-1">
@@ -236,7 +252,7 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
-      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
+      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} lastByExercise={lastByExercise} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
       {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
       {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} registerCustom={registerCustom} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
     </div>
@@ -332,23 +348,60 @@ function EditGoalSheet({ goal, onClose, onDone }) {
 /* ---------- Log flow (category → exercise → sets → per-set) ---------- */
 const CAT_MUSCLE = { Chest: "chest", Back: "lats", Shoulders: "shoulders", Biceps: "biceps", Triceps: "triceps", Legs: "quadriceps" };
 
+function fmtDate(iso) {
+  try { const d = new Date(iso + "T00:00:00"); const t = new Date(); const diff = Math.round((new Date(t.toISOString().slice(0,10)) - new Date(iso)) / 86400000);
+    if (diff === 0) return "today"; if (diff === 1) return "yesterday"; if (diff < 7) return diff + " days ago";
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return iso; }
+}
 function fmtClock(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(sec).padStart(2, "0");
 }
 
 // Session timer bar — manual start, auto-starts on first logged set, stop when done.
-function SessionBar({ start, onStart, onStop, loggedSecs }) {
+function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
+  const [editing, setEditing] = useState(false);
   useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
   if (!start)
     return <button onClick={onStart} className="glass flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]"><Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}</button>;
   const s = Math.max(0, Math.floor((now - start) / 1000));
   return (
-    <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
-      <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
-      <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
-    </div>
+    <>
+      <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
+        <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setEditing(true)} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
+          <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
+        </div>
+      </div>
+      {editing && <SessionEditSheet seconds={s} onClose={() => setEditing(false)} onApply={(sec) => { onEdit(sec); setEditing(false); }} />}
+    </>
+  );
+}
+
+function SessionEditSheet({ seconds, onClose, onApply }) {
+  const [h, setH] = useState(Math.floor(seconds / 3600));
+  const [m, setM] = useState(Math.floor((seconds % 3600) / 60));
+  const [sec, setSec] = useState(seconds % 60);
+  const clamp = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
+  const total = clamp(h, 24) * 3600 + clamp(m, 59) * 60 + clamp(sec, 59);
+  return (
+    <Sheet title="Edit session time" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-muted">Adjust the running timer — handy if you forgot to start or stop it. It keeps counting from whatever you set.</p>
+        <div className="flex items-end justify-center gap-2">
+          {[["Hours", h, setH, 24], ["Min", m, setM, 59], ["Sec", sec, setSec, 59]].map(([label, val, setter, max]) => (
+            <div key={label} className="text-center">
+              <input inputMode="numeric" value={val} onChange={(e) => setter(e.target.value)} className="inp w-20 py-3 text-center font-score text-2xl font-bold" />
+              <p className="mt-1 text-[10px] text-muted">{label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-center font-score text-lg font-bold text-gold">{fmtClock(total)}</p>
+        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>Set timer to {fmtClock(total)}</button>
+      </div>
+    </Sheet>
   );
 }
 
@@ -417,7 +470,7 @@ function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
 // Unified log engine. Normal mode: pick → sets → entry. Plan mode (queue): walks the
 // plan exercise-by-exercise, pre-filling each set with the target (editable), with rest
 // timers between sets AND between exercises. Auto-starts the session on the first set.
-function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [], startSession, onClose, onDone }) {
+function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [], lastByExercise = {}, startSession, onClose, onDone }) {
   const isPlan = Array.isArray(queue) && queue.length > 0;
   const exByNameLocal = useMemo(() => { const m = {}; exercises.forEach((e) => (m[e.name.toLowerCase()] = e)); return m; }, [exercises]);
   const resolveEx = useCallback((name, i) => exByNameLocal[name.toLowerCase()] || { id: "q" + i, name, images: [], muscle: "" }, [exByNameLocal]);
@@ -438,6 +491,9 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [
   const [restNow, setRestNow] = useState(0);
   useEffect(() => { if (!restSince) return; const t = setInterval(() => setRestNow(Date.now()), 1000); return () => clearInterval(t); }, [restSince]);
   const restSecs = restSince ? Math.floor((restNow - restSince) / 1000) : 0;
+  const prefs = useMemo(() => loadTimerPrefs(), []);
+  // last time this exercise was trained (for the per-set hint)
+  const lastSets = useMemo(() => (ex ? (lastByExercise[ex.name.toLowerCase()] || null) : null), [ex, lastByExercise]);
 
   const enterEntry = useCallback((exObj, nSets, tgt) => {
     setEx(exObj); setCount(Math.max(1, nSets || 3)); setTarget(tgt || null);
@@ -508,14 +564,25 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [
 
       {step === "entry" && (
         <div className="space-y-2">
-          {restSince && cur < count && (
-            <div className="glass sticky top-0 z-10 flex items-center justify-between rounded-full px-4 py-2">
-              <span className="flex items-center gap-2 text-sm font-bold text-gold"><Timer size={15} className="animate-pulse-soft" /> Rest {fmtClock(restSecs)}</span>
-              <button onClick={() => setRestSince(null)} className="text-[11px] font-semibold text-muted">dismiss</button>
-            </div>
-          )}
+          {restSince && cur < count && (() => {
+            const over = prefs.setRest > 0 && restSecs >= prefs.setRest;
+            return (
+              <div className={"sticky top-0 z-10 flex items-center justify-between rounded-full px-4 py-2 transition-colors " + (over ? "animate-pulse-rest bg-ember/90 text-ink" : "glass")}>
+                <span className={"flex items-center gap-2 text-sm font-bold " + (over ? "text-ink" : "text-gold")}>
+                  <Timer size={15} className={over ? "" : "animate-pulse-soft"} /> Rest {fmtClock(restSecs)}{prefs.setRest > 0 ? " / " + fmtClock(prefs.setRest) : ""}
+                </span>
+                <button onClick={() => setRestSince(null)} className={"text-[11px] font-semibold " + (over ? "text-ink/80" : "text-muted")}>{over ? "back to it!" : "dismiss"}</button>
+              </div>
+            );
+          })()}
           {isPlan && <button onClick={() => setStep("chooser")} className="pill">← Back to plan</button>}
           {isPlan && <p className="eyebrow">{ex?.name}{target ? " · target " + (target.weight || "?") + "kg × " + (target.reps || "?") : ""}</p>}
+          {lastSets && (
+            <div className="rounded-xl border border-line bg-surface2 px-3 py-2">
+              <p className="text-[11px] font-bold text-muted">Last time ({fmtDate(lastSets.date)})</p>
+              <p className="mt-0.5 text-[12px]">{lastSets.sets.map((st, k) => (st.weight ? st.weight + "kg" : "BW") + (st.reps ? "×" + st.reps : "")).join("  ·  ")}</p>
+            </div>
+          )}
           {Array.from({ length: count }).map((_, i) => {
             if (i < cur) { const s = sets[i]; return (
               <div key={i} className="flex items-center justify-between rounded-xl border border-line bg-surface2 px-4 py-3 text-sm">
@@ -537,6 +604,9 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [
                   <input className="inp py-4 text-center text-lg font-bold" inputMode="numeric" placeholder="reps" value={r} onChange={(e) => setR(e.target.value)} />
                   <button className="btn-primary shrink-0 px-5 py-4" onClick={saveSet} disabled={!w && !r}>{i + 1 === count ? "Save" : "Next"}</button>
                 </div>
+                {lastSets && lastSets.sets[i] && (
+                  <p className="mt-1.5 text-[11px] text-muted">Last time · {lastSets.sets[i].weight ? lastSets.sets[i].weight + "kg" : "bodyweight"}{lastSets.sets[i].reps ? " × " + lastSets.sets[i].reps : ""}</p>
+                )}
               </div>);
             return <div key={i} className="rounded-xl border border-line px-4 py-3 text-sm text-muted">Set {i + 1}</div>;
           })}
@@ -549,18 +619,21 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [
         </div>
       )}
 
-      {step === "rest" && (
-        <div className="space-y-4 py-4 text-center">
-          <div className="mx-auto grid h-28 w-28 place-items-center rounded-full border-4 border-gold">
-            <span className="font-score text-3xl font-bold text-gold">{fmtClock(restSecs)}</span>
+      {step === "rest" && (() => {
+        const over = prefs.exRest > 0 && restSecs >= prefs.exRest;
+        return (
+        <div className={"space-y-4 rounded-2xl py-6 text-center transition-colors " + (over ? "animate-pulse-rest bg-ember/90" : "")}>
+          <div className={"mx-auto grid h-28 w-28 place-items-center rounded-full border-4 " + (over ? "border-ink" : "border-gold")}>
+            <span className={"font-score text-3xl font-bold " + (over ? "text-ink" : "text-gold")}>{fmtClock(restSecs)}</span>
           </div>
-          <p className="eyebrow">Rest</p>
+          <p className={"eyebrow " + (over ? "text-ink" : "")}>{over ? "Time to move — back to it!" : "Rest" + (prefs.exRest > 0 ? " · target " + fmtClock(prefs.exRest) : "")}</p>
           <div className="space-y-2">
             <button className="btn-primary w-full py-4 text-base" onClick={logAnother}>Log another exercise</button>
-            <button className="pill mx-auto block px-6 py-2" onClick={onClose}>Done for now</button>
+            <button className={"pill mx-auto block px-6 py-2 " + (over ? "!text-ink" : "")} onClick={onClose}>Done for now</button>
           </div>
         </div>
-      )}
+        );
+      })()}
     </Sheet>
   );
 }

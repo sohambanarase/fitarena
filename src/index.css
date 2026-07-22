@@ -250,3 +250,6 @@
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+@keyframes pulseRest { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
+.animate-pulse-rest { animation: pulseRest 0.9s ease-in-out infinite; }

@@ -3,12 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft, Flower2 } from "lucide-react";
+import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft, Flower2, Timer} from "lucide-react";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
 import { currentStreak, consistencyScore, toISO } from "../lib/streak.js";
 import { Flame } from "lucide-react";
 import { currentTheme, applyTheme } from "../lib/theme.js";
+import { loadTimerPrefs, saveTimerPrefs } from "../lib/timerPrefs.js";
 import { pushSupported, isStandalone, pushStatus, enablePush, disablePush, sendTestPush } from "../lib/push.js";
 
 const GOALS = ["Lose fat", "Build muscle", "Recomp", "Stay consistent", "Get stronger", "Run more"];
@@ -22,6 +23,8 @@ export default function Profile() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState(currentTheme());
+  const [timers, setTimers] = useState(loadTimerPrefs());
+  const setTimer = (k, v) => { const next = { ...timers, [k]: Math.max(0, Math.floor(Number(v) || 0)) }; setTimers(next); saveTimerPrefs(next); };
   const switchTheme = (t) => { applyTheme(t); setTheme(t); };
   const [pushState, setPushState] = useState("loading");
   const [pushBusy, setPushBusy] = useState(false);
@@ -146,6 +149,26 @@ export default function Profile() {
           </button>
         </div>
         <p className="mt-1.5 text-[11px] text-muted">Bloom is a soft, colourful daylight theme.</p>
+      </div>
+
+      <div className="card">
+        <p className="eyebrow flex items-center gap-1"><Timer size={13} /> Rest timers</p>
+        <p className="mt-1 text-[11px] text-muted">When a rest runs past your limit, the timer turns red to nudge you back. Set 0 to turn a limit off.</p>
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-xs font-bold text-muted">Between sets (sec)</span>
+            <input inputMode="numeric" value={timers.setRest} onChange={(e) => setTimer("setRest", e.target.value)} className="mt-1 w-full rounded-xl border border-line bg-surface2 px-3 py-2.5 text-center font-score text-lg font-bold outline-none" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-muted">Between exercises (sec)</span>
+            <input inputMode="numeric" value={timers.exRest} onChange={(e) => setTimer("exRest", e.target.value)} className="mt-1 w-full rounded-xl border border-line bg-surface2 px-3 py-2.5 text-center font-score text-lg font-bold outline-none" />
+          </label>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {[60, 90, 120, 180].map((v) => (
+            <button key={v} onClick={() => setTimer("setRest", v)} className="pill text-[11px]">sets {v}s</button>
+          ))}
+        </div>
       </div>
 
       <button onClick={() => setShowHelp(true)} className="card flex w-full items-center gap-3 text-left active:scale-[.99]">

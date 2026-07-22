@@ -603,3 +603,19 @@ touch of periwinkle. Contrast re-checked: body text 13.6:1, accents 4.1–5.2:1.
   projected kg/week based on your average deficit or surplus.
 - **Model updated to Gemini 3.5 Flash** (released at Google I/O, May 2026) with an automatic fallback
   to 2.5 Flash if the key can't use it. Set `GEMINI_MODEL` in Vercel to pin a specific model.
+
+---
+
+## v14 — editable session timer, "last time" set hints, rest-timer limits
+
+No migration needed. Full zip.
+
+- **Edit the gym-session timer**: while a session is running, tap the pencil next to it to set the
+  time by hand (hours/minutes/seconds). It keeps counting from whatever you set — useful when you
+  forgot to start it, or forgot to stop it and it ran long.
+- **"Last time" hints while logging**: when you log an exercise you've done before, a summary shows
+  what you did last time (e.g. "25kg×12 · 30kg×10 · 35kg×8" with the date), and each active set shows
+  a small "Last time · 30kg × 10" line under the inputs so you can beat it set by set.
+- **Rest-timer limits with a red nudge**: in Profile → Rest timers, set a target for rest between sets
+  and between exercises (defaults 90s / 120s; 0 turns a limit off). When a rest runs past the limit,
+  the timer turns red and pulses ("back to it!") so you know to get moving.
