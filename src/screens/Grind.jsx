@@ -368,7 +368,12 @@ function fmtClock(s) {
 function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
   const [editing, setEditing] = useState(false);
-  useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
+  useEffect(() => {
+    if (!start) return;
+    setNow(Date.now());                    // snap immediately so an edit shows its exact value
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [start]);
   const s = start ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
 
   return (
@@ -402,66 +407,78 @@ function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
 }
 
 function SessionEditSheet({ seconds, running, onClose, onApply }) {
-  // Fields hold raw text while typing. Tapping a field CLEARS it (rather than relying on
-  // select-on-focus, which mobile Safari ignores) so what you type replaces the old value
-  // instead of being appended to it. Leaving a field blank restores what was there.
-  const [h, setH] = useState(String(Math.floor(seconds / 3600)));
-  const [m, setM] = useState(String(Math.floor((seconds % 3600) / 60)));
-  const [sc, setSc] = useState(String(seconds % 60));
+  // One field for the WHOLE time in minutes, so typing 10 means 10 minutes total —
+  // never added to what's already there. Seconds are optional and separate.
+  // Tapping a field clears it (mobile Safari ignores select-on-focus, which used to
+  // make typed digits append to the old value).
+  const [mins, setMins] = useState(String(Math.floor(seconds / 60)));
+  const [secs, setSecs] = useState(String(seconds % 60));
   const prior = useRef({});
+  const secsTouched = useRef(false);
 
-  const val = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
-  // minutes/seconds may exceed 59 while typing (e.g. "90"); they roll over when you leave the field
-  const total = Math.min(24 * 3600 - 1, val(h, 23) * 3600 + val(m, 599) * 60 + val(sc, 599));
+  const n = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
+  const total = Math.min(24 * 3600 - 1, n(mins, 1439) * 60 + n(secs, 59));
 
-  const fromTotal = (t) => {
+  const setFromTotal = (t) => {
     const x = Math.max(0, Math.min(24 * 3600 - 1, Math.round(t)));
-    setH(String(Math.floor(x / 3600))); setM(String(Math.floor((x % 3600) / 60))); setSc(String(x % 60));
+    setMins(String(Math.floor(x / 60))); setSecs(String(x % 60));
   };
 
-  const fields = [["Hours", "h", h, setH], ["Min", "m", m, setM], ["Sec", "s", sc, setSc]];
+  const field = (key, value, setter, max, cls) => (
+    <input
+      inputMode="numeric"
+      value={value}
+      placeholder={prior.current[key] != null ? prior.current[key] : "0"}
+      onFocus={() => { prior.current[key] = value; setter(""); if (key === "secs") secsTouched.current = true; }}
+      onChange={(e) => {
+        setter(e.target.value.replace(/[^0-9]/g, "").slice(0, key === "mins" ? 4 : 2));
+        // typing a minute value means e.g. 10:00 — drop stale seconds unless they were set on purpose
+        if (key === "mins" && !secsTouched.current) setSecs("0");
+      }}
+      onBlur={() => {
+        const restored = value === "" ? (prior.current[key] != null ? prior.current[key] : "0") : String(n(value, max));
+        setter(restored);
+      }}
+      className={"inp text-center font-score font-bold " + cls}
+    />
+  );
 
   return (
     <Sheet title={running ? "Edit session time" : "Set session time"} onClose={onClose}>
       <div className="space-y-4">
         <p className="text-sm text-muted">
           {running
-            ? "Type the total time you want on the clock, then it keeps counting from there. Handy if you forgot to start or stop it."
+            ? "Type the total time you want on the clock. It replaces what's there, it doesn't add to it."
             : "Start the session already part-way through, if you forgot to start it earlier."}
         </p>
 
-        <div className="flex items-end justify-center gap-2">
-          {fields.map(([label, key, value, setter]) => (
-            <div key={key} className="text-center">
-              <input
-                inputMode="numeric"
-                value={value}
-                placeholder={prior.current[key] != null ? prior.current[key] : "0"}
-                onFocus={() => { prior.current[key] = value; setter(""); }}
-                onChange={(e) => setter(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-                onBlur={() => {
-                  if (value === "") setter(prior.current[key] != null ? prior.current[key] : "0");
-                  else fromTotal(total);
-                }}
-                className="inp w-20 py-3 text-center font-score text-2xl font-bold"
-              />
-              <p className="mt-1 text-[10px] text-muted">{label}</p>
-            </div>
-          ))}
+        <div className="flex items-end justify-center gap-3">
+          <div className="text-center">
+            {field("mins", mins, setMins, 1439, "w-32 py-3 text-3xl")}
+            <p className="mt-1 text-[10px] text-muted">Total minutes</p>
+          </div>
+          <div className="text-center">
+            {field("secs", secs, setSecs, 59, "w-20 py-3 text-xl")}
+            <p className="mt-1 text-[10px] text-muted">Seconds</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap justify-center gap-1.5">
-          {[-10, -5, -1, 1, 5, 10].map((n) => (
-            <button key={n} onClick={() => fromTotal(total + n * 60)} className="pill text-[11px]">{n > 0 ? "+" : ""}{n}m</button>
+          {[-10, -5, -1, 1, 5, 10].map((v) => (
+            <button key={v} onClick={() => setFromTotal(total + v * 60)} className="pill text-[11px]">{v > 0 ? "+" : ""}{v}m</button>
           ))}
-          <button onClick={() => fromTotal(0)} className="pill text-[11px]">reset</button>
+        </div>
+        <div className="flex justify-center gap-1.5">
+          {[30, 45, 60, 90].map((v) => (
+            <button key={v} onClick={() => setFromTotal(v * 60)} className="pill text-[11px]">{v}m</button>
+          ))}
+          <button onClick={() => setFromTotal(0)} className="pill text-[11px] !text-ember">Clear to 0:00</button>
         </div>
 
         <p className="text-center font-score text-2xl font-bold text-gold">{fmtClock(total)}</p>
         <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>
           {running ? "Set timer to " + fmtClock(total) : "Start session at " + fmtClock(total)}
         </button>
-        <p className="text-center text-[11px] text-muted">This sets the clock to exactly this time, it doesn't add to it.</p>
       </div>
     </Sheet>
   );
