@@ -92,7 +92,15 @@ export async function updateEntry(entryId, sets, userId, exercise) {
 // ---- Session time ----
 export async function saveSession(userId, seconds) {
   if (!seconds || seconds < 5) return null;
-  return supabase.from("workout_sessions").insert({ user_id: userId, seconds: Math.round(seconds) });
+  return supabase.from("workout_sessions").insert({ user_id: userId, seconds: Math.round(seconds), log_date: toISO(new Date()) });
+}
+// Replace the whole day's logged session time with one figure (0 clears the day).
+// Used by the "min logged today" editor, since each finished session adds a row.
+export async function setSessionSeconds(userId, date, seconds) {
+  await supabase.from("workout_sessions").delete().eq("user_id", userId).eq("log_date", date);
+  const secs = Math.max(0, Math.round(seconds || 0));
+  if (secs < 5) return null;
+  return supabase.from("workout_sessions").insert({ user_id: userId, log_date: date, seconds: secs });
 }
 export async function loadSessionSeconds(userId, date) {
   const { data } = await supabase.from("workout_sessions").select("seconds").eq("user_id", userId).eq("log_date", date);
