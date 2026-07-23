@@ -6,7 +6,7 @@ import {
   logExercise, loadEntries, removeEntry, setsOf,
   loadPlans, savePlan, deletePlan, logPlan,
   loadCustomExercises, addCustomExercise, updateEntry,
-  saveSession, loadSessionSeconds,
+  saveSession, loadSessionSeconds, setSessionSeconds,
 } from "../lib/grind.js";
 import { loadTimerPrefs } from "../lib/timerPrefs.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
@@ -120,6 +120,10 @@ export default function Grind() {
     setSessionStart(null);
     if (startedAt) { await saveSession(user.id, (Date.now() - startedAt) / 1000); refreshSessions(); }
   };
+  const applyLoggedTime = async (seconds) => {
+    await setSessionSeconds(user.id, date, seconds);
+    refreshSessions();
+  };
   const editSession = (seconds) => {
     const t = Date.now() - Math.max(0, seconds) * 1000;   // shift the start so the clock reads `seconds`
     setSessionStart(t);
@@ -167,7 +171,7 @@ export default function Grind() {
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
 
-      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} loggedSecs={daySeconds} />
+      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} onSetLogged={applyLoggedTime} loggedSecs={daySeconds} />
 
       {/* Log / Planner switch */}
       <div className="glass grid grid-cols-2 gap-1 rounded-2xl p-1">
@@ -365,9 +369,9 @@ function fmtClock(s) {
 }
 
 // Session timer bar — manual start, auto-starts on first logged set, stop when done.
-function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
+function SessionBar({ start, onStart, onStop, onEdit, onSetLogged, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(null);   // "clock" | "logged" | null
   useEffect(() => {
     if (!start) return;
     setNow(Date.now());                    // snap immediately so an edit shows its exact value
@@ -375,38 +379,60 @@ function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
     return () => clearInterval(t);
   }, [start]);
   const s = start ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
+  const loggedMin = Math.round((loggedSecs || 0) / 60);
 
   return (
-    <>
+    <div className="space-y-1.5">
       {!start ? (
         <div className="flex items-center gap-2">
           <button onClick={onStart} className="glass flex flex-1 items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]">
-            <Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}
+            <Timer size={15} /> Start gym session
           </button>
-          <button onClick={() => setEditing(true)} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
+          <button onClick={() => setEditing("clock")} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
         </div>
       ) : (
         <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
           <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
           <div className="flex items-center gap-2">
-            <button onClick={() => setEditing(true)} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
+            <button onClick={() => setEditing("clock")} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
             <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
           </div>
         </div>
       )}
-      {editing && (
+
+      {/* the day's banked total — tap to correct it */}
+      <button onClick={() => setEditing("logged")} aria-label="Edit time logged today"
+        className="flex w-full items-center justify-center gap-1 text-[11px] font-semibold text-muted active:scale-[.98]">
+        {loggedMin > 0 ? loggedMin + " min logged today" : "No time logged today"} <Pencil size={11} />
+      </button>
+
+      {editing === "clock" && (
         <SessionEditSheet
-          seconds={s}                              /* read once on open; the sheet won't re-sync while you type */
-          running={!!start}
-          onClose={() => setEditing(false)}
-          onApply={(sec) => { onEdit(sec); setEditing(false); }}
+          seconds={s}
+          title={start ? "Edit session time" : "Set session time"}
+          blurb={start
+            ? "Type the total time you want on the clock. It replaces what's there, it doesn't add to it."
+            : "Start the session already part-way through, if you forgot to start it earlier."}
+          cta={(t) => (start ? "Set timer to " + t : "Start session at " + t)}
+          onClose={() => setEditing(null)}
+          onApply={(sec) => { onEdit(sec); setEditing(null); }}
         />
       )}
-    </>
+      {editing === "logged" && (
+        <SessionEditSheet
+          seconds={loggedSecs || 0}
+          title="Time logged today"
+          blurb="This is the total gym time saved for today. Type the figure you want and it replaces the total — it doesn't add to it."
+          cta={(t) => "Save " + t + " for today"}
+          onClose={() => setEditing(null)}
+          onApply={(sec) => { onSetLogged(sec); setEditing(null); }}
+        />
+      )}
+    </div>
   );
 }
 
-function SessionEditSheet({ seconds, running, onClose, onApply }) {
+function SessionEditSheet({ seconds, title, blurb, cta, onClose, onApply }) {
   // One field for the WHOLE time in minutes, so typing 10 means 10 minutes total —
   // never added to what's already there. Seconds are optional and separate.
   // Tapping a field clears it (mobile Safari ignores select-on-focus, which used to
@@ -444,13 +470,9 @@ function SessionEditSheet({ seconds, running, onClose, onApply }) {
   );
 
   return (
-    <Sheet title={running ? "Edit session time" : "Set session time"} onClose={onClose}>
+    <Sheet title={title} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-sm text-muted">
-          {running
-            ? "Type the total time you want on the clock. It replaces what's there, it doesn't add to it."
-            : "Start the session already part-way through, if you forgot to start it earlier."}
-        </p>
+        <p className="text-sm text-muted">{blurb}</p>
 
         <div className="flex items-end justify-center gap-3">
           <div className="text-center">
@@ -476,9 +498,7 @@ function SessionEditSheet({ seconds, running, onClose, onApply }) {
         </div>
 
         <p className="text-center font-score text-2xl font-bold text-gold">{fmtClock(total)}</p>
-        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>
-          {running ? "Set timer to " + fmtClock(total) : "Start session at " + fmtClock(total)}
-        </button>
+        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>{cta(fmtClock(total))}</button>
       </div>
     </Sheet>
   );
