@@ -87,6 +87,10 @@ export default function Grind() {
   const [tab, setTab] = useState("log"); // log | planner
   const [goals, setGoals] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [exercises, setExercises] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [date, setDate] = useState(toISO(new Date()));
   const lastByExercise = useMemo(() => {
     // entries arrive newest-first; keep the first past-day occurrence of each exercise
     const map = {};
@@ -97,10 +101,6 @@ export default function Grind() {
     }
     return map;
   }, [entries, date]);
-  const [plans, setPlans] = useState([]);
-  const [exercises, setExercises] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [date, setDate] = useState(toISO(new Date()));
   const [addingGoal, setAddingGoal] = useState(false);
   const [editGoal, setEditGoal] = useState(null);
   const [logging, setLogging] = useState(false);
