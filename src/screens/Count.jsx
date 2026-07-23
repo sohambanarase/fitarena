@@ -65,6 +65,8 @@ export default function Count() {
   const [showBurn, setShowBurn] = useState(false);
   const [series, setSeries] = useState([]);
   const [showStats, setShowStats] = useState(false);
+  const [toast, setToast] = useState(null);
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
   const isToday = date === today;
   const shiftDay = (d) => setDate(toISO(new Date(new Date(date + "T00:00:00").getTime() + d * 86400000)));
   const dayLabel = isToday ? "Today" : new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -205,7 +207,22 @@ export default function Count() {
                 <section key={meal} className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <p className="eyebrow">{MEAL_LABELS[meal]}{items.length ? " · " + Math.round(mt.cal) + " kcal · " + Math.round(mt.p) + "g P" : ""}</p>
-                    <button onClick={() => setAdd({ view: "home", meal })} className="pill flex items-center gap-1"><Plus size={13} /> Add</button>
+                    <div className="flex items-center gap-1.5">
+                      {items.length > 0 && (
+                        <button
+                          aria-label={"Save " + MEAL_LABELS[meal] + " as a meal plan"}
+                          onClick={async () => {
+                            const linked = items.filter((i) => i.food_id);
+                            if (!linked.length) { flash("Nothing to save here — these entries aren't linked to a food."); return; }
+                            const label = MEAL_LABELS[meal] + " · " + new Date(date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+                            await createSavedMeal(user.id, label, linked.map((i) => ({ food_id: i.food_id, grams: Number(i.quantity_grams || i.quantity) || 100 })));
+                            const skipped = items.length - linked.length;
+                            flash("Saved \"" + label + "\" to your meal plans" + (skipped ? " (" + skipped + " item" + (skipped > 1 ? "s" : "") + " skipped)" : ""));
+                          }}
+                          className="pill flex items-center gap-1"><Bookmark size={13} /> Save</button>
+                      )}
+                      <button onClick={() => setAdd({ view: "home", meal })} className="pill flex items-center gap-1"><Plus size={13} /> Add</button>
+                    </div>
                   </div>
                   {items.map((i) => (
                     <div key={i.id} className="panel flex items-center gap-2 p-3">
@@ -246,6 +263,11 @@ export default function Count() {
       {add && <AddFoodSheet userId={user.id} date={date} initial={add} goals={goals} totals={t} onClose={() => setAdd(null)} onLogged={load} />}
       {editLog && <EditLogSheet userId={user.id} entry={editLog} onClose={() => setEditLog(null)} onSaved={load} />}
       {showStats && <StatsSheet series={series} goals={goals} today={{ eaten: t.calories, burned, protein: t.protein }} onClose={() => setShowStats(false)} />}
+      {toast && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[120] flex justify-center px-6">
+          <div className="glass-strong rounded-full px-4 py-2.5 text-center text-sm font-bold shadow-lg">{toast}</div>
+        </div>
+      )}
       {showBurn && <BurnSheet userId={user.id} date={date} weightKg={profile?.current_weight_kg} onClose={() => setShowBurn(false)} onSaved={load} />}
     </div>
   );

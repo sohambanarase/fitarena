@@ -15,7 +15,7 @@ import CountUp from "../components/CountUp.jsx";
 import ScreenHeader from "../components/ScreenHeader.jsx";
 import Loader from "../components/Loader.jsx";
 import { Timer, Copy as CopyIcon } from "lucide-react";
-import { Plus, Target, Trash2, Check, ChevronLeft, ChevronRight, Search, X, Lock, Dumbbell, Copy, Play, Pencil, Layers } from "lucide-react";
+import { Plus, Target, Trash2, Check, ChevronLeft, ChevronRight, Search, X, Lock, Dumbbell, Copy, Play, Pencil, Layers, TrendingUp, LineChart} from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 const shiftISO = (iso, d) => { const [y, m, dd] = iso.split("-").map(Number); return toISO(new Date(y, m - 1, dd + d)); };
@@ -107,6 +107,7 @@ export default function Grind() {
   const [detail, setDetail] = useState(null);
   const [editPlan, setEditPlan] = useState(undefined); // undefined=closed, null=new, obj=edit
   const [logQueue, setLogQueue] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
   const [logStart, setLogStart] = useState(0);
   const [sessionStart, setSessionStart] = useState(() => { try { const v = localStorage.getItem("fitarena.session"); return v ? Number(v) : null; } catch { return null; } });
   const startSession = useCallback(() => { setSessionStart((cur) => { if (cur) return cur; const t = Date.now(); try { localStorage.setItem("fitarena.session", String(t)); } catch {} return t; }); }, []);
@@ -154,7 +155,11 @@ export default function Grind() {
 
   return (
     <div className="screen animate-screen space-y-4">
-      <ScreenHeader eyebrow="Your training camp" title="The Grind" />
+      <ScreenHeader eyebrow="Your training camp" title="The Grind" right={
+        <button onClick={() => setShowHistory(true)} aria-label="Exercise history" className="flex items-center gap-1.5 rounded-full bg-surface2 px-3 py-2 text-[11px] font-bold text-muted active:scale-95">
+          <LineChart size={15} /> History
+        </button>
+      } />
 
       <div className="flex gap-2">
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Active goals</p><p className="font-score text-xl font-bold text-gold"><CountUp value={goals.length} duration={500} /></p></div>
@@ -252,6 +257,7 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
+      {showHistory && <ExerciseHistorySheet userId={user.id} onClose={() => setShowHistory(false)} />}
       {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} lastByExercise={lastByExercise} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
       {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
       {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} registerCustom={registerCustom} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
@@ -363,43 +369,93 @@ function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
   const [editing, setEditing] = useState(false);
   useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
-  if (!start)
-    return <button onClick={onStart} className="glass flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]"><Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}</button>;
-  const s = Math.max(0, Math.floor((now - start) / 1000));
+  const s = start ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
+
   return (
     <>
-      <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
-        <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
+      {!start ? (
         <div className="flex items-center gap-2">
-          <button onClick={() => setEditing(true)} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
-          <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
+          <button onClick={onStart} className="glass flex flex-1 items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]">
+            <Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}
+          </button>
+          <button onClick={() => setEditing(true)} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
         </div>
-      </div>
-      {editing && <SessionEditSheet seconds={s} onClose={() => setEditing(false)} onApply={(sec) => { onEdit(sec); setEditing(false); }} />}
+      ) : (
+        <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
+          <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setEditing(true)} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
+            <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
+          </div>
+        </div>
+      )}
+      {editing && (
+        <SessionEditSheet
+          seconds={s}                              /* read once on open; the sheet won't re-sync while you type */
+          running={!!start}
+          onClose={() => setEditing(false)}
+          onApply={(sec) => { onEdit(sec); setEditing(false); }}
+        />
+      )}
     </>
   );
 }
 
-function SessionEditSheet({ seconds, onClose, onApply }) {
-  const [h, setH] = useState(Math.floor(seconds / 3600));
-  const [m, setM] = useState(Math.floor((seconds % 3600) / 60));
-  const [sec, setSec] = useState(seconds % 60);
-  const clamp = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
-  const total = clamp(h, 24) * 3600 + clamp(m, 59) * 60 + clamp(sec, 59);
+function SessionEditSheet({ seconds, running, onClose, onApply }) {
+  // Fields hold raw text while typing (no re-formatting mid-keystroke, which fights
+  // the cursor on phones); they're normalised on blur.
+  const [h, setH] = useState(String(Math.floor(seconds / 3600)));
+  const [m, setM] = useState(String(Math.floor((seconds % 3600) / 60)));
+  const [sc, setSc] = useState(String(seconds % 60));
+
+  const val = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
+  // minutes/seconds may be over 59 while typing (e.g. "90"); they roll over on blur
+  const total = Math.min(24 * 3600 - 1, val(h, 23) * 3600 + val(m, 599) * 60 + val(sc, 599));
+
+  const onDigits = (setter) => (e) => setter(e.target.value.replace(/[^0-9]/g, "").slice(0, 3));
+  const fromTotal = (t) => {
+    const x = Math.max(0, Math.min(24 * 3600 - 1, Math.round(t)));
+    setH(String(Math.floor(x / 3600))); setM(String(Math.floor((x % 3600) / 60))); setSc(String(x % 60));
+  };
+
+  const fields = [["Hours", h, setH], ["Min", m, setM], ["Sec", sc, setSc]];
+
   return (
-    <Sheet title="Edit session time" onClose={onClose}>
+    <Sheet title={running ? "Edit session time" : "Set session time"} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-sm text-muted">Adjust the running timer — handy if you forgot to start or stop it. It keeps counting from whatever you set.</p>
+        <p className="text-sm text-muted">
+          {running
+            ? "Set the elapsed time by hand and it keeps counting from there. Handy if you forgot to start or stop it."
+            : "Start the session already part-way through, if you forgot to start it earlier."}
+        </p>
+
         <div className="flex items-end justify-center gap-2">
-          {[["Hours", h, setH, 24], ["Min", m, setM, 59], ["Sec", sec, setSec, 59]].map(([label, val, setter, max]) => (
+          {fields.map(([label, value, setter]) => (
             <div key={label} className="text-center">
-              <input inputMode="numeric" value={val} onChange={(e) => setter(e.target.value)} className="inp w-20 py-3 text-center font-score text-2xl font-bold" />
+              <input
+                inputMode="numeric"
+                value={value}
+                onFocus={(e) => e.target.select()}
+                onChange={onDigits(setter)}
+                onBlur={() => fromTotal(total)}   /* normalises 90 min into 1h 30m */
+                className="inp w-20 py-3 text-center font-score text-2xl font-bold"
+              />
               <p className="mt-1 text-[10px] text-muted">{label}</p>
             </div>
           ))}
         </div>
-        <p className="text-center font-score text-lg font-bold text-gold">{fmtClock(total)}</p>
-        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>Set timer to {fmtClock(total)}</button>
+
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {[-10, -5, -1, 1, 5, 10].map((n) => (
+            <button key={n} onClick={() => fromTotal(total + n * 60)} className="pill text-[11px]">{n > 0 ? "+" : ""}{n}m</button>
+          ))}
+          <button onClick={() => fromTotal(0)} className="pill text-[11px]">reset</button>
+        </div>
+
+        <p className="text-center font-score text-2xl font-bold text-gold">{fmtClock(total)}</p>
+        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>
+          {running ? "Set timer to " + fmtClock(total) : "Start session at " + fmtClock(total)}
+        </button>
       </div>
     </Sheet>
   );
@@ -727,5 +783,255 @@ function Mini({ label, value, onChange }) {
       <input className="w-full bg-transparent text-center outline-none" inputMode="decimal" placeholder={label} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
       <span className="text-[10px] text-muted">{label}</span>
     </label>
+  );
+}
+
+/* ---------- Exercise history & progression ---------- */
+const SET_COLORS = ["rgb(var(--c-gold))", "rgb(var(--c-mint))", "rgb(var(--c-ember))", "#6C8CF5", "#B072E8", "#E8A33D"];
+const e1rm = (w, r) => (w && r ? Math.round(w * (1 + r / 30)) : w || 0);
+
+function ExerciseHistorySheet({ userId, onClose }) {
+  const [range, setRange] = useState(30);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [all, setAll] = useState(null);
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState(null);
+  const [sel, setSel] = useState(null);
+
+  useEffect(() => {
+    setAll(null);
+    const days = range === "custom" ? 1095 : range;
+    loadEntries(userId, Math.max(days, 7)).then(setAll).catch(() => setAll([]));
+  }, [userId, range]);
+
+  const inRange = useCallback((iso) => {
+    if (range === "custom") {
+      if (from && iso < from) return false;
+      if (to && iso > to) return false;
+      return true;
+    }
+    return iso >= toISO(new Date(Date.now() - range * 86400000));
+  }, [range, from, to]);
+
+  const rows = useMemo(() => (all || []).filter((e) => inRange(e.log_date)), [all, inRange]);
+
+  // exercise list with how often it appears
+  const exList = useMemo(() => {
+    const m = {};
+    rows.forEach((e) => {
+      const k = e.exercise.toLowerCase();
+      if (!m[k]) m[k] = { name: e.exercise, sessions: 0, last: e.log_date };
+      m[k].sessions++;
+      if (e.log_date > m[k].last) m[k].last = e.log_date;
+    });
+    const list = Object.values(m).sort((a, b) => b.sessions - a.sessions);
+    const needle = q.trim().toLowerCase();
+    return needle ? list.filter((x) => x.name.toLowerCase().includes(needle)) : list;
+  }, [rows, q]);
+
+  // sessions for the picked exercise, oldest first
+  const sessions = useMemo(() => {
+    if (!picked) return [];
+    return rows
+      .filter((e) => e.exercise.toLowerCase() === picked.toLowerCase())
+      .map((e) => {
+        const sets = setsOf(e).map((s) => ({ weight: Number(s.weight) || 0, reps: Number(s.reps) || 0 }));
+        const volume = sets.reduce((n, s) => n + s.weight * s.reps, 0);
+        const top = sets.reduce((n, s) => Math.max(n, s.weight), 0);
+        const best1rm = sets.reduce((n, s) => Math.max(n, e1rm(s.weight, s.reps)), 0);
+        return { id: e.id, date: e.log_date, sets, volume, top, best1rm, reps: sets.reduce((n, s) => n + s.reps, 0) };
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+  }, [rows, picked]);
+
+  const stats = useMemo(() => {
+    if (!sessions.length) return null;
+    const prWeight = Math.max(...sessions.map((s) => s.top));
+    const pr1rm = Math.max(...sessions.map((s) => s.best1rm));
+    const bestVol = Math.max(...sessions.map((s) => s.volume));
+    const totalSets = sessions.reduce((n, s) => n + s.sets.length, 0);
+    const first = sessions[0], last = sessions[sessions.length - 1];
+    return {
+      prWeight, pr1rm, bestVol, totalSets, count: sessions.length,
+      topDelta: last.top - first.top,
+      volDelta: last.volume - first.volume,
+      firstDate: first.date, lastDate: last.date,
+    };
+  }, [sessions]);
+
+  const maxSets = Math.min(6, sessions.reduce((n, s) => Math.max(n, s.sets.length), 0));
+
+  return (
+    <Sheet title="Exercise history" onClose={onClose}>
+      <div className="space-y-3">
+        {/* range picker */}
+        <div className="flex flex-wrap gap-1.5">
+          {[[7, "7 days"], [30, "30 days"], [90, "3 months"], [180, "6 months"], [365, "1 year"], ["custom", "Custom"]].map(([v, l]) => (
+            <button key={l} onClick={() => { setRange(v); setSel(null); }} className={"pill text-[11px] " + (range === v ? "pill-on" : "")}>{l}</button>
+          ))}
+        </div>
+        {range === "custom" && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="inp flex-1 py-2 text-xs" />
+            <span className="text-xs text-muted">to</span>
+            <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="inp flex-1 py-2 text-xs" />
+          </div>
+        )}
+
+        {all === null ? <Loader label="Loading your history…" /> : !picked ? (
+          <>
+            <div className="search-glass"><Search size={18} className="text-muted" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search an exercise" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+            <div className="max-h-[52vh] space-y-1.5 overflow-y-auto">
+              {exList.length === 0 && <p className="px-1 text-sm text-muted">Nothing logged in this range. Try a longer period.</p>}
+              {exList.map((x) => (
+                <button key={x.name} onClick={() => { setPicked(x.name); setSel(null); }} className="panel flex w-full items-center gap-3 p-2.5 text-left active:scale-[.99]">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold capitalize">{x.name}</p>
+                    <p className="text-[11px] text-muted">{x.sessions} session{x.sessions !== 1 ? "s" : ""} · last {fmtDate(x.last)}</p>
+                  </div>
+                  <ChevronRight size={16} className="shrink-0 text-muted" />
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <button onClick={() => { setPicked(null); setSel(null); }} className="pill">← All exercises</button>
+            <p className="font-display text-lg capitalize">{picked}</p>
+
+            {sessions.length === 0 ? (
+              <p className="text-sm text-muted">No sessions for this exercise in the selected range.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-4 gap-1.5 text-center">
+                  <div className="panel py-2"><p className="font-score text-base font-bold text-gold">{stats.prWeight}</p><p className="text-[9px] text-muted">best kg</p></div>
+                  <div className="panel py-2"><p className="font-score text-base font-bold text-mint">{stats.pr1rm}</p><p className="text-[9px] text-muted">est 1RM</p></div>
+                  <div className="panel py-2"><p className="font-score text-base font-bold">{Math.round(stats.bestVol)}</p><p className="text-[9px] text-muted">best volume</p></div>
+                  <div className="panel py-2"><p className="font-score text-base font-bold">{stats.count}</p><p className="text-[9px] text-muted">sessions</p></div>
+                </div>
+
+                <WeightPerSetChart sessions={sessions} maxSets={maxSets} sel={sel} onSelect={setSel} />
+                <VolumeChart sessions={sessions} sel={sel} onSelect={setSel} />
+
+                {sel != null && sessions[sel] && (
+                  <div className="panel">
+                    <p className="eyebrow mb-1">{fmtDate(sessions[sel].date)}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {sessions[sel].sets.map((st, i) => (
+                        <span key={i} className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: SET_COLORS[i % SET_COLORS.length], color: "rgb(var(--c-ink))" }}>
+                          {st.weight ? st.weight + "kg" : "BW"}{st.reps ? " × " + st.reps : ""}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-muted">Volume {Math.round(sessions[sel].volume)} kg · {sessions[sel].sets.length} sets · {sessions[sel].reps} reps</p>
+                  </div>
+                )}
+
+                <div className="card">
+                  <p className="eyebrow mb-1 flex items-center gap-1"><TrendingUp size={12} /> Progress</p>
+                  <p className="text-sm">
+                    Top set {stats.topDelta === 0 ? "held steady" : stats.topDelta > 0 ? <span className="font-bold text-mint">up {stats.topDelta}kg</span> : <span className="font-bold text-ember">down {Math.abs(stats.topDelta)}kg</span>} since {fmtDate(stats.firstDate)}.
+                  </p>
+                  <p className="mt-1 text-[12px] text-muted">
+                    {stats.count} session{stats.count !== 1 ? "s" : ""} · {stats.totalSets} sets · session volume {stats.volDelta >= 0 ? "+" : ""}{Math.round(stats.volDelta)} kg vs your first.
+                  </p>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+function ChartFrame({ title, legend, children }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <p className="eyebrow">{title}</p>
+        {legend}
+      </div>
+      <div className="rounded-2xl bg-surface2 p-2.5">{children}</div>
+    </div>
+  );
+}
+
+// One coloured line per set number, so you can see set 1 / 2 / 3 progressing separately.
+function WeightPerSetChart({ sessions, maxSets, sel, onSelect }) {
+  const W = 300, H = 130, PADL = 26, PADB = 16;
+  const weights = sessions.flatMap((s) => s.sets.map((x) => x.weight)).filter((n) => n > 0);
+  const max = Math.max(1, ...weights) * 1.1;
+  const min = Math.max(0, Math.min(...(weights.length ? weights : [0])) * 0.85);
+  const x = (i) => PADL + (sessions.length === 1 ? (W - PADL) / 2 : (i * (W - PADL - 6)) / (sessions.length - 1));
+  const y = (v) => H - PADB - ((v - min) / (max - min || 1)) * (H - PADB - 6);
+
+  return (
+    <ChartFrame
+      title="Weight per set"
+      legend={
+        <span className="flex flex-wrap gap-1.5">
+          {Array.from({ length: maxSets }).map((_, i) => (
+            <span key={i} className="flex items-center gap-1 text-[9px] text-muted">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: SET_COLORS[i % SET_COLORS.length] }} />set {i + 1}
+            </span>
+          ))}
+        </span>
+      }
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        {[max, (max + min) / 2, min].map((v, i) => (
+          <g key={i}>
+            <line x1={PADL} x2={W} y1={y(v)} y2={y(v)} stroke="rgb(var(--c-line))" strokeWidth="1" />
+            <text x="2" y={y(v) + 3} fontSize="8" fill="rgb(var(--c-muted))">{Math.round(v)}</text>
+          </g>
+        ))}
+        {Array.from({ length: maxSets }).map((_, si) => {
+          const pts = sessions.map((s, i) => (s.sets[si] && s.sets[si].weight ? { x: x(i), y: y(s.sets[si].weight) } : null)).filter(Boolean);
+          if (pts.length === 0) return null;
+          return (
+            <g key={si}>
+              {pts.length > 1 && <polyline fill="none" stroke={SET_COLORS[si % SET_COLORS.length]} strokeWidth="2" strokeLinejoin="round" points={pts.map((p) => p.x + "," + p.y).join(" ")} />}
+              {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="3" fill={SET_COLORS[si % SET_COLORS.length]} />)}
+            </g>
+          );
+        })}
+        {sessions.map((s, i) => (
+          <rect key={i} x={x(i) - 8} y="0" width="16" height={H - PADB + 6} fill="transparent" onClick={() => onSelect(sel === i ? null : i)} style={{ cursor: "pointer" }} />
+        ))}
+        {sel != null && <line x1={x(sel)} x2={x(sel)} y1="0" y2={H - PADB} stroke="rgb(var(--c-paper))" strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />}
+        {sessions.length > 1 && (
+          <>
+            <text x={PADL} y={H - 3} fontSize="8" fill="rgb(var(--c-muted))">{fmtDate(sessions[0].date)}</text>
+            <text x={W} y={H - 3} textAnchor="end" fontSize="8" fill="rgb(var(--c-muted))">{fmtDate(sessions[sessions.length - 1].date)}</text>
+          </>
+        )}
+      </svg>
+      <p className="mt-1 text-center text-[10px] text-muted">Tap a point to see that session</p>
+    </ChartFrame>
+  );
+}
+
+function VolumeChart({ sessions, sel, onSelect }) {
+  const W = 300, H = 90, PADB = 14;
+  const max = Math.max(1, ...sessions.map((s) => s.volume)) * 1.1;
+  const bw = Math.max(6, Math.min(24, (W - 8) / sessions.length - 4));
+  const step = sessions.length > 1 ? (W - bw - 8) / (sessions.length - 1) : 0;
+  return (
+    <ChartFrame title="Session volume (kg lifted)">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        {sessions.map((s, i) => {
+          const x = 4 + i * step, h = ((s.volume / max) * (H - PADB)) || 0;
+          return (
+            <g key={i} onClick={() => onSelect(sel === i ? null : i)} style={{ cursor: "pointer" }}>
+              <rect x={x} y={H - PADB - h} width={bw} height={h} rx="3" fill="rgb(var(--c-gold))" opacity={sel == null || sel === i ? 0.9 : 0.35} />
+              <rect x={x} y="0" width={bw} height={H} fill="transparent" />
+            </g>
+          );
+        })}
+        <line x1="0" x2={W} y1={H - PADB} y2={H - PADB} stroke="rgb(var(--c-line))" strokeWidth="1" />
+      </svg>
+    </ChartFrame>
   );
 }
