@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { loadExercises, imageUrl, imageFallback } from "../lib/exercises.js";
 import {
@@ -6,7 +6,7 @@ import {
   logExercise, loadEntries, removeEntry, setsOf,
   loadPlans, savePlan, deletePlan, logPlan,
   loadCustomExercises, addCustomExercise, updateEntry,
-  saveSession, loadSessionSeconds, setSessionSeconds,
+  saveSession, loadSessionSeconds,
 } from "../lib/grind.js";
 import { loadTimerPrefs } from "../lib/timerPrefs.js";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
@@ -108,6 +108,8 @@ export default function Grind() {
   const [editPlan, setEditPlan] = useState(undefined); // undefined=closed, null=new, obj=edit
   const [logQueue, setLogQueue] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [toast, setToast] = useState(null);
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
   const [logStart, setLogStart] = useState(0);
   const [sessionStart, setSessionStart] = useState(() => { try { const v = localStorage.getItem("fitarena.session"); return v ? Number(v) : null; } catch { return null; } });
   const startSession = useCallback(() => { setSessionStart((cur) => { if (cur) return cur; const t = Date.now(); try { localStorage.setItem("fitarena.session", String(t)); } catch {} return t; }); }, []);
@@ -119,10 +121,6 @@ export default function Grind() {
     try { localStorage.removeItem("fitarena.session"); } catch {}
     setSessionStart(null);
     if (startedAt) { await saveSession(user.id, (Date.now() - startedAt) / 1000); refreshSessions(); }
-  };
-  const applyLoggedTime = async (seconds) => {
-    await setSessionSeconds(user.id, date, seconds);
-    refreshSessions();
   };
   const editSession = (seconds) => {
     const t = Date.now() - Math.max(0, seconds) * 1000;   // shift the start so the clock reads `seconds`
@@ -171,7 +169,7 @@ export default function Grind() {
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
 
-      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} onSetLogged={applyLoggedTime} loggedSecs={daySeconds} />
+      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} loggedSecs={daySeconds} />
 
       {/* Log / Planner switch */}
       <div className="glass grid grid-cols-2 gap-1 rounded-2xl p-1">
@@ -207,7 +205,25 @@ export default function Grind() {
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="eyebrow flex items-center gap-1"><Dumbbell size={12} /> Workout</p>
-              <button onClick={() => { setLogQueue(null); setLogStart(0); setLogging(true); }} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Log workout</button>
+              <div className="flex items-center gap-1.5">
+                {dayEntries.length > 0 && (
+                  <button
+                    aria-label="Save this workout as a plan"
+                    onClick={async () => {
+                      const exercises = dayEntries.map((e) => {
+                        const st = setsOf(e);
+                        const top = st.reduce((a, x) => (Number(x.weight) > Number(a.weight || 0) ? x : a), st[0] || {});
+                        return { exercise: e.exercise, sets: st.length || 3, weight: top?.weight ?? "", reps: top?.reps ?? "" };
+                      });
+                      const name = dayLabel(date) + " workout";
+                      await savePlan({ user_id: user.id, name, exercises });
+                      setPlans(await loadPlans(user.id));
+                      flash("Saved as a plan — find it in Planner");
+                    }}
+                    className="pill flex items-center gap-1"><Layers size={13} /> Save as plan</button>
+                )}
+                <button onClick={() => { setLogQueue(null); setLogStart(0); setLogging(true); }} className="pill pill-on flex items-center gap-1"><Plus size={14} /> Log workout</button>
+              </div>
             </div>
             {dayEntries.length === 0
               ? <p className="text-sm text-muted">Nothing logged for {dayLabel(date).toLowerCase()}. Tap "Log workout".</p>
@@ -261,6 +277,11 @@ export default function Grind() {
 
       {addingGoal && <AddGoalSheet userId={user.id} exercises={exercises} onClose={() => setAddingGoal(false)} onDone={load} />}
       {editGoal && <EditGoalSheet goal={editGoal} onClose={() => setEditGoal(null)} onDone={load} />}
+      {toast && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[120] flex justify-center px-6">
+          <div className="glass-strong rounded-full px-4 py-2.5 text-center text-sm font-bold shadow-lg">{toast}</div>
+        </div>
+      )}
       {showHistory && <ExerciseHistorySheet userId={user.id} onClose={() => setShowHistory(false)} />}
       {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} lastByExercise={lastByExercise} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
       {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
@@ -369,136 +390,97 @@ function fmtClock(s) {
 }
 
 // Session timer bar — manual start, auto-starts on first logged set, stop when done.
-function SessionBar({ start, onStart, onStop, onEdit, onSetLogged, loggedSecs }) {
+function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
-  const [editing, setEditing] = useState(null);   // "clock" | "logged" | null
-  useEffect(() => {
-    if (!start) return;
-    setNow(Date.now());                    // snap immediately so an edit shows its exact value
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [start]);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
   const s = start ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
-  const loggedMin = Math.round((loggedSecs || 0) / 60);
 
   return (
-    <div className="space-y-1.5">
+    <>
       {!start ? (
         <div className="flex items-center gap-2">
           <button onClick={onStart} className="glass flex flex-1 items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]">
-            <Timer size={15} /> Start gym session
+            <Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}
           </button>
-          <button onClick={() => setEditing("clock")} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
+          <button onClick={() => setEditing(true)} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
         </div>
       ) : (
         <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
           <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
           <div className="flex items-center gap-2">
-            <button onClick={() => setEditing("clock")} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
+            <button onClick={() => setEditing(true)} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
             <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
           </div>
         </div>
       )}
-
-      {/* the day's banked total — tap to correct it */}
-      <button onClick={() => setEditing("logged")} aria-label="Edit time logged today"
-        className="flex w-full items-center justify-center gap-1 text-[11px] font-semibold text-muted active:scale-[.98]">
-        {loggedMin > 0 ? loggedMin + " min logged today" : "No time logged today"} <Pencil size={11} />
-      </button>
-
-      {editing === "clock" && (
+      {editing && (
         <SessionEditSheet
-          seconds={s}
-          title={start ? "Edit session time" : "Set session time"}
-          blurb={start
-            ? "Type the total time you want on the clock. It replaces what's there, it doesn't add to it."
-            : "Start the session already part-way through, if you forgot to start it earlier."}
-          cta={(t) => (start ? "Set timer to " + t : "Start session at " + t)}
-          onClose={() => setEditing(null)}
-          onApply={(sec) => { onEdit(sec); setEditing(null); }}
+          seconds={s}                              /* read once on open; the sheet won't re-sync while you type */
+          running={!!start}
+          onClose={() => setEditing(false)}
+          onApply={(sec) => { onEdit(sec); setEditing(false); }}
         />
       )}
-      {editing === "logged" && (
-        <SessionEditSheet
-          seconds={loggedSecs || 0}
-          title="Time logged today"
-          blurb="This is the total gym time saved for today. Type the figure you want and it replaces the total — it doesn't add to it."
-          cta={(t) => "Save " + t + " for today"}
-          onClose={() => setEditing(null)}
-          onApply={(sec) => { onSetLogged(sec); setEditing(null); }}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
-function SessionEditSheet({ seconds, title, blurb, cta, onClose, onApply }) {
-  // One field for the WHOLE time in minutes, so typing 10 means 10 minutes total —
-  // never added to what's already there. Seconds are optional and separate.
-  // Tapping a field clears it (mobile Safari ignores select-on-focus, which used to
-  // make typed digits append to the old value).
-  const [mins, setMins] = useState(String(Math.floor(seconds / 60)));
-  const [secs, setSecs] = useState(String(seconds % 60));
-  const prior = useRef({});
-  const secsTouched = useRef(false);
+function SessionEditSheet({ seconds, running, onClose, onApply }) {
+  // Fields hold raw text while typing (no re-formatting mid-keystroke, which fights
+  // the cursor on phones); they're normalised on blur.
+  const [h, setH] = useState(String(Math.floor(seconds / 3600)));
+  const [m, setM] = useState(String(Math.floor((seconds % 3600) / 60)));
+  const [sc, setSc] = useState(String(seconds % 60));
 
-  const n = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
-  const total = Math.min(24 * 3600 - 1, n(mins, 1439) * 60 + n(secs, 59));
+  const val = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
+  // minutes/seconds may be over 59 while typing (e.g. "90"); they roll over on blur
+  const total = Math.min(24 * 3600 - 1, val(h, 23) * 3600 + val(m, 599) * 60 + val(sc, 599));
 
-  const setFromTotal = (t) => {
+  const onDigits = (setter) => (e) => setter(e.target.value.replace(/[^0-9]/g, "").slice(0, 3));
+  const fromTotal = (t) => {
     const x = Math.max(0, Math.min(24 * 3600 - 1, Math.round(t)));
-    setMins(String(Math.floor(x / 60))); setSecs(String(x % 60));
+    setH(String(Math.floor(x / 3600))); setM(String(Math.floor((x % 3600) / 60))); setSc(String(x % 60));
   };
 
-  const field = (key, value, setter, max, cls) => (
-    <input
-      inputMode="numeric"
-      value={value}
-      placeholder={prior.current[key] != null ? prior.current[key] : "0"}
-      onFocus={() => { prior.current[key] = value; setter(""); if (key === "secs") secsTouched.current = true; }}
-      onChange={(e) => {
-        setter(e.target.value.replace(/[^0-9]/g, "").slice(0, key === "mins" ? 4 : 2));
-        // typing a minute value means e.g. 10:00 — drop stale seconds unless they were set on purpose
-        if (key === "mins" && !secsTouched.current) setSecs("0");
-      }}
-      onBlur={() => {
-        const restored = value === "" ? (prior.current[key] != null ? prior.current[key] : "0") : String(n(value, max));
-        setter(restored);
-      }}
-      className={"inp text-center font-score font-bold " + cls}
-    />
-  );
+  const fields = [["Hours", h, setH], ["Min", m, setM], ["Sec", sc, setSc]];
 
   return (
-    <Sheet title={title} onClose={onClose}>
+    <Sheet title={running ? "Edit session time" : "Set session time"} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-sm text-muted">{blurb}</p>
+        <p className="text-sm text-muted">
+          {running
+            ? "Set the elapsed time by hand and it keeps counting from there. Handy if you forgot to start or stop it."
+            : "Start the session already part-way through, if you forgot to start it earlier."}
+        </p>
 
-        <div className="flex items-end justify-center gap-3">
-          <div className="text-center">
-            {field("mins", mins, setMins, 1439, "w-32 py-3 text-3xl")}
-            <p className="mt-1 text-[10px] text-muted">Total minutes</p>
-          </div>
-          <div className="text-center">
-            {field("secs", secs, setSecs, 59, "w-20 py-3 text-xl")}
-            <p className="mt-1 text-[10px] text-muted">Seconds</p>
-          </div>
+        <div className="flex items-end justify-center gap-2">
+          {fields.map(([label, value, setter]) => (
+            <div key={label} className="text-center">
+              <input
+                inputMode="numeric"
+                value={value}
+                onFocus={(e) => e.target.select()}
+                onChange={onDigits(setter)}
+                onBlur={() => fromTotal(total)}   /* normalises 90 min into 1h 30m */
+                className="inp w-20 py-3 text-center font-score text-2xl font-bold"
+              />
+              <p className="mt-1 text-[10px] text-muted">{label}</p>
+            </div>
+          ))}
         </div>
 
         <div className="flex flex-wrap justify-center gap-1.5">
-          {[-10, -5, -1, 1, 5, 10].map((v) => (
-            <button key={v} onClick={() => setFromTotal(total + v * 60)} className="pill text-[11px]">{v > 0 ? "+" : ""}{v}m</button>
+          {[-10, -5, -1, 1, 5, 10].map((n) => (
+            <button key={n} onClick={() => fromTotal(total + n * 60)} className="pill text-[11px]">{n > 0 ? "+" : ""}{n}m</button>
           ))}
-        </div>
-        <div className="flex justify-center gap-1.5">
-          {[30, 45, 60, 90].map((v) => (
-            <button key={v} onClick={() => setFromTotal(v * 60)} className="pill text-[11px]">{v}m</button>
-          ))}
-          <button onClick={() => setFromTotal(0)} className="pill text-[11px] !text-ember">Clear to 0:00</button>
+          <button onClick={() => fromTotal(0)} className="pill text-[11px]">reset</button>
         </div>
 
         <p className="text-center font-score text-2xl font-bold text-gold">{fmtClock(total)}</p>
-        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>{cta(fmtClock(total))}</button>
+        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>
+          {running ? "Set timer to " + fmtClock(total) : "Start session at " + fmtClock(total)}
+        </button>
       </div>
     </Sheet>
   );

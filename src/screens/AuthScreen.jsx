@@ -43,7 +43,7 @@ export default function AuthScreen() {
         <h1 className="font-display text-6xl uppercase leading-none tracking-wide">
           Fit<span className="text-gold">Arena</span>
         </h1>
-        <p className="mt-2 text-sm text-muted">Show up. Out-train your friends. Ends Aug 31.</p>
+        <p className="mt-2 text-sm text-muted">Show up. Out-train your friends.</p>
       </div>
 
       <div className="card space-y-3">

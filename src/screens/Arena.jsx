@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabase.js";
 import { buildLeaderboard, toISO } from "../lib/streak.js";
 import { loadGroupWins } from "../lib/achievements.js";
 import CountdownBell from "../components/CountdownBell.jsx";
+import ChallengeEndedBanner, { ChallengeDateSheet } from "../components/ChallengeEndedBanner.jsx";
 import CheckInCard from "../components/CheckInCard.jsx";
 import ContenderCard from "../components/ContenderCard.jsx";
 import WinsFeed from "../components/WinsFeed.jsx";
@@ -113,6 +114,9 @@ export default function Arena() {
           <span className="truncate font-bold">{activeChallenge.name}</span>
           <ChevronDown size={16} className="shrink-0 text-gold" />
         </button>
+        <button onClick={() => navigate("/board")} aria-label="Global board" className="pill flex shrink-0 items-center justify-center gap-1 px-2.5">
+          <Trophy size={13} className="text-gold" />
+        </button>
         <button onClick={() => setSheet("invite")} className="pill flex w-14 shrink-0 items-center justify-center gap-1">
           <UserPlus size={14} />
         </button>
@@ -133,7 +137,10 @@ export default function Arena() {
         </button>
       </div>
 
-      <CountdownBell endDate={activeChallenge.end_date} />
+      <ChallengeEndedBanner challenge={activeChallenge} onChanged={refresh} />
+      <button onClick={() => setSheet("enddate")} className="w-full text-left active:scale-[.99]">
+        <CountdownBell endDate={activeChallenge.end_date} status={activeChallenge.status} />
+      </button>
       <CheckInCard savedType={savedType} onSubmit={submitCheckIn} saving={saving} />
       {err && <p className="rounded-xl border border-ember/50 bg-ember/10 px-3 py-2 text-sm text-ember">{err}</p>}
 
@@ -165,6 +172,7 @@ export default function Arena() {
         </div>
       )}
       {sheet === "invite" && <InviteSheet challenge={activeChallenge} onClose={() => setSheet(null)} />}
+      {sheet === "enddate" && <ChallengeDateSheet challenge={activeChallenge} onClose={() => setSheet(null)} onChanged={refresh} />}
       {sheet === "members" && <MembersSheet challenge={activeChallenge} board={board} meId={user.id} sessions={crewSessions} onClose={() => setSheet(null)} onChanged={load} onDeleteChallenge={async () => { await supabase.rpc("delete_challenge", { c_id: activeChallenge.id }); setSheet(null); refresh(); }} />}
     </div>
   );

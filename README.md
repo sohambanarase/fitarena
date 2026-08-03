@@ -619,3 +619,43 @@ No migration needed. Full zip.
 - **Rest-timer limits with a red nudge**: in Profile → Rest timers, set a target for rest between sets
   and between exercises (defaults 90s / 120s; 0 turns a limit off). When a rest runs past the limit,
   the timer turns red and pulses ("back to it!") so you know to get moving.
+
+---
+
+## v15 — flexible challenge dates, permanent global score, save-as-plan, save AI foods
+
+**Database step:** run `supabase/migration_v14.sql`. Then push.
+
+### Challenge dates are no longer fixed
+- The hardcoded 31 August date is gone everywhere. New challenges default to 30 days out.
+- **Tap the countdown** on the home screen to change the end date at any time.
+- When a challenge passes its end date, a banner appears with two choices: **Keep going**
+  (pick a new date, with 2 weeks / 30 / 60 / 90-day presets) or **Complete** it. The countdown shows
+  "Ended" / "Completed" instead of a dead zero. Existing challenges aren't touched by the migration —
+  the app asks you rather than moving your dates for you.
+
+### Permanent global score + leaderboard
+A new **Global board** (trophy icon in the Arena header, top left). Points never reset and carry
+across every challenge.
+
+| What | Points |
+|---|---|
+| Training day (lift or cardio) | +10 |
+| Streak bonus | +1 per consecutive day, capped at +15/day |
+| Weekly goal met | +25 per week |
+| Personal record / brag | +5 / +2 |
+| Streak milestones | +25 at 7 days, +100 at 30, +250 at 100 |
+
+Rest days earn nothing but protect the streak, up to **3 in a row**. A 4th straight rest day, or a day
+with nothing logged, resets it. Today never breaks your streak until the day is over. Set a
+**nickname** on the board to appear publicly; the score is recomputed from your full history each time
+(so it can't drift or double-count) and published to the shared board.
+
+### Grind: save a workout as a plan
+The workout log now has a **Save as plan** button. It turns everything logged that day into a reusable
+plan (using your top set for each exercise as the target), ready in the Planner tab.
+
+### Count: save an AI-estimated meal as a food
+After an AI estimate, tick **Save this as a food**. Give the portion weight and it's stored per 100g so
+you can re-log it later at any amount on the scale. Leave the weight blank and it's saved as one
+100 g portion. The logged entry links to the new food, so it shows up in recents too.

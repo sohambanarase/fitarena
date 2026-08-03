@@ -24,7 +24,7 @@ create table if not exists public.challenges (
   name        text not null default 'Summer Cut',
   invite_code text not null unique default upper(substr(md5(random()::text), 1, 6)), -- e.g. "A1F4C9"
   start_date  date not null default current_date,
-  end_date    date not null default '2026-08-31',
+  end_date    date not null default (current_date + 30),
   created_by  uuid not null references auth.users(id) on delete cascade,
   created_at  timestamptz not null default now()
 );

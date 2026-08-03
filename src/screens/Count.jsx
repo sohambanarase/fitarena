@@ -577,19 +577,22 @@ function AIView({ userId, initialMode, goals, totals, openReview, onLog, meal, s
       <div className="flex gap-1.5">
         {tabs.map(([k, l]) => <button key={k} onClick={() => setMode(k)} className={"pill flex-1 py-2 " + (mode === k ? "pill-on" : "")}>{l}</button>)}
       </div>
-      {mode === "describe" && <AIDescribe onLog={onLog} meal={meal} setMeal={setMeal} />}
+      {mode === "describe" && <AIDescribe userId={userId} onLog={onLog} meal={meal} setMeal={setMeal} />}
       {mode === "label" && <AILabel openReview={openReview} />}
       {mode === "assist" && <AIAssist goals={goals} totals={totals} />}
     </div>
   );
 }
 
-function AIDescribe({ onLog, meal, setMeal }) {
+function AIDescribe({ userId, onLog, meal, setMeal }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [est, setEst] = useState(null);
   const [err, setErr] = useState(null);
   const [photo, setPhoto] = useState(null); // { b64, mime, name } — kept in memory only, never stored
+  const [keep, setKeep] = useState(false);   // save the estimate as a reusable food
+  const [portion, setPortion] = useState("");
+  const [saving, setSaving] = useState(false);
   async function pickPhoto(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -640,10 +643,44 @@ function AIDescribe({ onLog, meal, setMeal }) {
             <Field label="Fat g" value={est.fat ?? ""} onChange={(v) => setEst({ ...est, fat: num(v) })} />
           </div>
           <MealPicker meal={meal} setMeal={setMeal} />
-          <button className="btn-primary w-full" onClick={() => onLog({
-            name: (text.trim() || "Meal from photo").slice(0, 60), quantity: 1, quantity_unit: "meal",
-            calculated_calories: est.calories, calculated_protein: est.protein, calculated_carbs: est.carbs, calculated_fat: est.fat,
-          })}>Add to today</button>
+
+          <div className="panel space-y-2">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="h-4 w-4 accent-gold" />
+              <span className="text-sm font-bold">Save this as a food</span>
+            </label>
+            <p className="text-[11px] text-muted">Keeps it in your foods so you can log it again later and change the amount on the scale.</p>
+            {keep && (
+              <>
+                <input className="inp" inputMode="decimal" value={portion} onChange={(e) => setPortion(e.target.value)} placeholder="How much did it weigh in grams? (optional)" />
+                <p className="text-[11px] text-muted">
+                  {portion
+                    ? "Stored per 100g, so you can log any amount next time."
+                    : "Leave blank and it's saved as one 100 g portion — logging 50 gives you half."}
+                </p>
+              </>
+            )}
+          </div>
+
+          <button className="btn-primary w-full" disabled={saving} onClick={async () => {
+            const name = (text.trim() || "Meal from photo").slice(0, 60);
+            if (!keep) {
+              onLog({ name, quantity: 1, quantity_unit: "meal",
+                calculated_calories: est.calories, calculated_protein: est.protein, calculated_carbs: est.carbs, calculated_fat: est.fat });
+              return;
+            }
+            setSaving(true);
+            const grams = Math.max(1, Number(portion) || 100);
+            const per = (v) => (v == null ? null : Math.round((Number(v) * 100 / grams) * 10) / 10);
+            const saved = await ensureFood(userId, {
+              name, source: "ai", serving_size: grams,
+              calories_per_100g: per(est.calories), protein_per_100g: per(est.protein),
+              carbs_per_100g: per(est.carbs), fat_per_100g: per(est.fat),
+            });
+            setSaving(false);
+            onLog({ food_id: (saved && saved.id) || null, name, quantity: grams, quantity_unit: "g", quantity_grams: grams,
+              calculated_calories: est.calories, calculated_protein: est.protein, calculated_carbs: est.carbs, calculated_fat: est.fat });
+          }}>{saving ? "Saving…" : keep ? "Save food & add to today" : "Add to today"}</button>
         </div>
       )}
     </div>

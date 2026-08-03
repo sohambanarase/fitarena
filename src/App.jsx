@@ -9,6 +9,7 @@ import Coach from "./screens/Coach.jsx";
 import Playbook from "./screens/Playbook.jsx";
 import Profile from "./screens/Profile.jsx";
 import Count from "./screens/Count.jsx";
+import GlobalBoard from "./screens/GlobalBoard.jsx";
 
 export default function App() {
   const { session, loading } = useAuth();
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/playbook" element={<Playbook />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/count" element={<Count />} />
+        <Route path="/board" element={<GlobalBoard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <BottomNav />

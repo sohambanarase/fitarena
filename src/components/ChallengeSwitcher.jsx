@@ -1,3 +1,4 @@
+import { defaultEndDate } from "../lib/challenge.js";
 import { useState } from "react";
 import Sheet from "./Sheet.jsx";
 import { supabase } from "../lib/supabase.js";
@@ -57,7 +58,7 @@ export default function ChallengeSwitcher({ onClose }) {
 }
 
 function CreateForm({ userId, name, onDone, onBack }) {
-  const [form, setForm] = useState({ name: `${name || "Our"} Challenge`, end_date: "2026-08-31", goal: "" });
+  const [form, setForm] = useState({ name: `${name || "Our"} Challenge`, end_date: defaultEndDate(30), goal: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
