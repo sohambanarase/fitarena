@@ -144,6 +144,32 @@ export default async function handler(req, res) {
     }
   }
 
+  // 5) HYDRATION NUDGES (only while behind the goal, inside the user's own local window)
+  {
+    const { data: hyd } = await db.from("nutrition_goals")
+      .select("user_id, water_goal_ml, water_every_h, water_from_h, water_to_h, water_tz_min, water_last_ping")
+      .eq("water_reminders", true);
+    const now = new Date();
+    for (const row of hyd || []) {
+      if (!subscribed.has(row.user_id)) continue;
+      const tz = Number(row.water_tz_min) || 0;
+      const local = new Date(now.getTime() + tz * 60000);
+      const hour = local.getUTCHours();
+      const from = row.water_from_h ?? 9, to = row.water_to_h ?? 21;
+      if (hour < from || hour >= to) continue;
+      const everyMs = Math.max(1, Number(row.water_every_h) || 2) * 3600000;
+      if (row.water_last_ping && now - new Date(row.water_last_ping) < everyMs) continue;
+      const localDate = local.toISOString().slice(0, 10);
+      const { data: wl } = await db.from("water_logs").select("ml").eq("user_id", row.user_id).eq("log_date", localDate);
+      const drank = (wl || []).reduce((n, r) => n + (Number(r.ml) || 0), 0);
+      const goal = Number(row.water_goal_ml) || 2500;
+      if (drank >= goal) continue;                       // already there, leave them alone
+      const left = goal - drank;
+      queue.push({ userIds: [row.user_id], title: "Water break 💧", body: left + " ml to go today. Grab a glass.", tag: "water" });
+      await db.from("nutrition_goals").update({ water_last_ping: now.toISOString() }).eq("user_id", row.user_id);
+    }
+  }
+
   // SEND
   let sent = 0, pruned = 0;
   for (const item of queue) {

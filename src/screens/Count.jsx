@@ -7,6 +7,10 @@ import Loader from "../components/Loader.jsx";
 import QuantityScale from "../components/QuantityScale.jsx";
 import CameraScanner from "../components/CameraScanner.jsx";
 import {
+  DEFAULT_WATER_GOAL, DEFAULT_PRESETS, loadWater, addWater, updateWater, removeWater, waterTotal,
+  loadWaterRange, hydrationInsights, suggestedGoal, hydrationTip,
+} from "../lib/water.js";
+import {
   MEALS, MEAL_LABELS, QUICK_FOODS,
   loadGoals, saveGoals, addFood, searchFoods, recentFoods,
   loadLogs, logFood, removeLog, macrosFor, dayTotals, lookupBarcode,
@@ -18,7 +22,7 @@ import {
   updateSavedMeal, addSavedMealItem, updateSavedMealItem, deleteSavedMealItem,
   loadBurnRange, dailySeries, projectedWeeklyChangeKg,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell, Scale } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell, Scale, Droplet, Bell, GlassWater } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 const GOAL_BAND = 0.10;   // ±10% counts as hitting the goal
@@ -66,6 +70,9 @@ export default function Count() {
   const [series, setSeries] = useState([]);
   const [showStats, setShowStats] = useState(false);
   const [toast, setToast] = useState(null);
+  const [water, setWater] = useState([]);
+  const [waterRange, setWaterRange] = useState([]);
+  const [showWater, setShowWater] = useState(false);
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
   const isToday = date === today;
   const shiftDay = (d) => setDate(toISO(new Date(new Date(date + "T00:00:00").getTime() + d * 86400000)));
@@ -74,11 +81,12 @@ export default function Count() {
   const load = useCallback(async () => {
     setLoading(true);
     const since = toISO(new Date(Date.now() - 6 * 86400000));
-    const [g, l, range, bn, burnRange] = await Promise.all([
+    const [g, l, range, bn, burnRange, w, wRange] = await Promise.all([
       loadGoals(user.id), loadLogs(user.id, date), loadRange(user.id, since), loadBurn(user.id, date), loadBurnRange(user.id, since),
+      loadWater(user.id, date), loadWaterRange(user.id, since),
     ]);
     setGoals(g); setLogs(l); setInsights(weeklyInsights(range, g)); setBurn(bn);
-    setSeries(dailySeries(range, burnRange, 7)); setLoading(false);
+    setSeries(dailySeries(range, burnRange, 7)); setWater(w); setWaterRange(wRange); setLoading(false);
   }, [user.id, date]);
   useEffect(() => { load(); }, [load]);
 
@@ -158,6 +166,13 @@ export default function Count() {
               </>
             )}
           </div>
+
+          {/* water */}
+          <WaterCard
+            rows={water} goals={goals} burned={burned} protein={t.protein}
+            onOpen={() => setShowWater(true)}
+            onQuickAdd={async (ml, label) => { await addWater(user.id, date, ml, label); load(); }}
+          />
 
           {/* quick actions */}
           <div className="grid grid-cols-3 gap-2">
@@ -260,13 +275,20 @@ export default function Count() {
       )}
 
       {showGoals && <GoalsSheet userId={user.id} goals={goals} onClose={() => setShowGoals(false)} onSaved={load} />}
-      {add && <AddFoodSheet userId={user.id} date={date} initial={add} goals={goals} totals={t} onClose={() => setAdd(null)} onLogged={load} />}
+      {add && <AddFoodSheet userId={user.id} date={date} initial={add} goals={goals} totals={t} water={{ total: waterTotal(water), goal: (goals && goals.water_goal_ml) || DEFAULT_WATER_GOAL }} onClose={() => setAdd(null)} onLogged={load} />}
       {editLog && <EditLogSheet userId={user.id} entry={editLog} onClose={() => setEditLog(null)} onSaved={load} />}
       {showStats && <StatsSheet series={series} goals={goals} today={{ eaten: t.calories, burned, protein: t.protein }} onClose={() => setShowStats(false)} />}
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[120] flex justify-center px-6">
           <div className="glass-strong rounded-full px-4 py-2.5 text-center text-sm font-bold shadow-lg">{toast}</div>
         </div>
+      )}
+      {showWater && (
+        <WaterSheet
+          userId={user.id} date={date} rows={water} rangeRows={waterRange} goals={goals}
+          burned={burned} protein={t.protein}
+          onClose={() => setShowWater(false)} onChanged={load} flash={flash}
+        />
       )}
       {showBurn && <BurnSheet userId={user.id} date={date} weightKg={profile?.current_weight_kg} onClose={() => setShowBurn(false)} onSaved={load} />}
     </div>
@@ -323,7 +345,7 @@ function Field({ label, value, onChange }) {
 }
 
 /* ---------- Add food (search / manual / barcode / quick / ai) → review ---------- */
-function AddFoodSheet({ userId, date, initial, goals, totals, onClose, onLogged }) {
+function AddFoodSheet({ userId, date, initial, goals, totals, water, onClose, onLogged }) {
   const [view, setView] = useState(initial.view === "home" ? "home" : initial.view);
   const [meal, setMeal] = useState(initial.meal || "snacks");
   const [review, setReview] = useState(null); // food object to review
@@ -339,7 +361,7 @@ function AddFoodSheet({ userId, date, initial, goals, totals, onClose, onLogged 
       {view === "myfoods" && <MyFoodsView userId={userId} onPick={openReview} />}
       {view === "saved" && <SavedMealsView userId={userId} date={date} meal={meal} setMeal={setMeal} onLogged={() => { onLogged(); onClose(); }} />}
       {view === "barcode" && <BarcodeView onPick={openReview} />}
-      {view === "ai" && <AIView userId={userId} initialMode={initial.aiMode} goals={goals} totals={totals} openReview={openReview} onLog={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} meal={meal} setMeal={setMeal} />}
+      {view === "ai" && <AIView userId={userId} initialMode={initial.aiMode} goals={goals} totals={totals} water={water} openReview={openReview} onLog={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} meal={meal} setMeal={setMeal} />}
       {view === "review" && review && (
         <ReviewFood food={review} meal={meal} setMeal={setMeal} userId={userId}
           onAdd={async (entry) => { await logFood({ ...entry, user_id: userId, log_date: date, meal_type: meal }); onLogged(); onClose(); }} />
@@ -569,7 +591,7 @@ function BarcodeView({ onPick }) {
   );
 }
 
-function AIView({ userId, initialMode, goals, totals, openReview, onLog, meal, setMeal }) {
+function AIView({ userId, initialMode, goals, totals, water, openReview, onLog, meal, setMeal }) {
   const [mode, setMode] = useState(initialMode || "describe");
   const tabs = [["describe", "Describe meal"], ["label", "Scan label"], ["assist", "Ask coach"]];
   return (
@@ -579,7 +601,7 @@ function AIView({ userId, initialMode, goals, totals, openReview, onLog, meal, s
       </div>
       {mode === "describe" && <AIDescribe userId={userId} onLog={onLog} meal={meal} setMeal={setMeal} />}
       {mode === "label" && <AILabel openReview={openReview} />}
-      {mode === "assist" && <AIAssist goals={goals} totals={totals} />}
+      {mode === "assist" && <AIAssist goals={goals} totals={totals} water={water} />}
     </div>
   );
 }
@@ -715,17 +737,17 @@ function AILabel({ openReview }) {
   );
 }
 
-function AIAssist({ goals, totals }) {
+function AIAssist({ goals, totals, water }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState(null);
   const [err, setErr] = useState(null);
-  const prompts = ["How much protein do I still need today?", "Suggest a high-protein dinner under 700 calories.", "What should I eat after my workout?", "Build me a 2500 kcal muscle-gain day."];
+  const prompts = ["How much protein do I still need today?", "Suggest a high-protein dinner under 700 calories.", "Am I drinking enough water today?", "What should I eat after my workout?"];
   async function ask(question) {
     const text = (question || q).trim(); if (!text) return;
     setBusy(true); setErr(null); setAnswer(null);
     try {
-      const context = { calories: totals?.calories, protein: totals?.protein, carbs: totals?.carbs, fat: totals?.fat, caloriesGoal: goals?.calories_goal, proteinGoal: goals?.protein_goal };
+      const context = { calories: totals?.calories, protein: totals?.protein, carbs: totals?.carbs, fat: totals?.fat, caloriesGoal: goals?.calories_goal, proteinGoal: goals?.protein_goal, waterMl: water?.total, waterGoalMl: water?.goal };
       const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "assist", question: text, context }) });
       const j = await res.json();
       if (!res.ok || !j.ok) setErr(j.error || "Couldn't answer. Try rephrasing.");
@@ -1379,6 +1401,263 @@ function EditSavedMeal({ userId, meal, onDone, onCancel }) {
         {busy ? "Saving…" : "Save meal"}
       </button>
       <p className="text-[11px] text-muted">Item changes save as you make them.</p>
+    </div>
+  );
+}
+
+/* ---------- Water: compact dashboard card ---------- */
+function waterPresets(goals) {
+  const saved = goals && goals.water_presets;
+  return Array.isArray(saved) && saved.length ? saved : DEFAULT_PRESETS;
+}
+
+function WaterCard({ rows, goals, burned, protein, onOpen, onQuickAdd }) {
+  const total = waterTotal(rows);
+  const goal = (goals && goals.water_goal_ml) || DEFAULT_WATER_GOAL;
+  const pct = Math.min(100, Math.round((total / goal) * 100));
+  const left = Math.max(0, goal - total);
+  const presets = waterPresets(goals).slice(0, 3);
+
+  return (
+    <div className="panel">
+      <button onClick={onOpen} className="flex w-full items-center gap-3 text-left active:scale-[.99]">
+        <div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-surface2">
+          <div className="absolute inset-x-0 bottom-0 transition-all" style={{ height: pct + "%", background: "var(--grad-mint)", opacity: 0.35 }} />
+          <Droplet size={18} className="relative text-mint" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm font-bold">Water</span>
+            <span className="font-score text-sm font-bold">{total} <span className="text-[11px] font-normal text-muted">/ {goal} ml</span></span>
+          </div>
+          <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-surface2">
+            <div className="h-full rounded-full transition-all" style={{ width: pct + "%", background: "var(--grad-mint)" }} />
+          </div>
+          <p className="mt-1 text-[11px] text-muted">{hydrationTip({ total, goal, burnedKcal: burned, proteinG: protein })}</p>
+        </div>
+      </button>
+      <div className="mt-2 flex gap-1.5">
+        {presets.map((p, i) => (
+          <button key={i} onClick={() => onQuickAdd(p.ml, p.label)} className="pill flex-1 py-2 text-[11px]">+{p.ml}</button>
+        ))}
+        <button onClick={onOpen} aria-label="Water details" className="pill px-3 py-2"><Plus size={13} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Water: full sheet ---------- */
+function WaterSheet({ userId, date, rows, rangeRows, goals, burned, protein, onClose, onChanged, flash }) {
+  const [tab, setTab] = useState("today");
+  const total = waterTotal(rows);
+  const goal = (goals && goals.water_goal_ml) || DEFAULT_WATER_GOAL;
+  const presets = waterPresets(goals);
+  const insights = hydrationInsights(rangeRows, goal);
+  const suggestion = suggestedGoal(goal, { burnedKcal: burned, proteinG: protein });
+
+  const add = async (ml, label) => { if (ml > 0) { await addWater(userId, date, ml, label); onChanged(); } };
+
+  return (
+    <Sheet title="Water" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="flex gap-1.5">
+          {[["today", "Today"], ["settings", "Goal & reminders"], ["history", "History"]].map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)} className={"pill flex-1 py-2 text-[11px] " + (tab === k ? "pill-on" : "")}>{l}</button>
+          ))}
+        </div>
+
+        {tab === "today" && (
+          <WaterToday rows={rows} total={total} goal={goal} presets={presets} burned={burned} protein={protein}
+            onAdd={add} onChanged={onChanged} />
+        )}
+        {tab === "settings" && (
+          <WaterSettings userId={userId} goals={goals} goal={goal} presets={presets} suggestion={suggestion}
+            onChanged={onChanged} flash={flash} />
+        )}
+        {tab === "history" && <WaterHistory insights={insights} goal={goal} />}
+      </div>
+    </Sheet>
+  );
+}
+
+function WaterToday({ rows, total, goal, presets, burned, protein, onAdd, onChanged }) {
+  const [custom, setCustom] = useState("");
+  const pct = Math.min(100, Math.round((total / goal) * 100));
+  const left = Math.max(0, goal - total);
+
+  return (
+    <div className="space-y-3">
+      <div className="card text-center">
+        <p className="font-score text-3xl font-bold text-mint">{total} <span className="text-base font-normal text-muted">/ {goal} ml</span></p>
+        <div className="mx-auto mt-2 h-3 w-full overflow-hidden rounded-full bg-surface2">
+          <div className="h-full rounded-full transition-all" style={{ width: pct + "%", background: "var(--grad-mint)" }} />
+        </div>
+        <p className="mt-1.5 text-[12px] text-muted">{left > 0 ? left + " ml to go · about " + Math.ceil(left / 250) + " glasses" : "Goal reached"}</p>
+        <p className="mt-1 text-[11px] text-muted">{hydrationTip({ total, goal, burnedKcal: burned, proteinG: protein })}</p>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {presets.map((p, i) => (
+          <button key={i} onClick={() => onAdd(p.ml, p.label)} className="pill flex-1 py-2.5 text-[11px]">+{p.ml} <span className="text-muted">{p.label}</span></button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input className="inp flex-1" inputMode="numeric" value={custom} onChange={(e) => setCustom(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Custom amount in ml" />
+        <button className="btn-primary px-4 py-3" disabled={!custom} onClick={() => { onAdd(Number(custom)); setCustom(""); }}>Add</button>
+      </div>
+
+      <div className="space-y-1.5">
+        <p className="eyebrow">Today's entries</p>
+        {rows.length === 0 && <p className="text-sm text-muted">Nothing logged yet today.</p>}
+        {rows.map((r) => (
+          <div key={r.id} className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+            <GlassWater size={15} className="shrink-0 text-mint" />
+            <span className="min-w-0 flex-1 truncate text-sm">{r.label || "Water"} <span className="text-[11px] text-muted">{new Date(r.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span></span>
+            <input
+              className="w-20 rounded-lg bg-surface px-2 py-1.5 text-center text-paper outline-none"
+              inputMode="numeric" defaultValue={r.ml}
+              onBlur={async (e) => { const v = Number(e.target.value) || 0; if (v !== r.ml) { v > 0 ? await updateWater(r.id, v) : await removeWater(r.id); onChanged(); } }}
+            />
+            <span className="text-[11px] text-muted">ml</span>
+            <button onClick={async () => { await removeWater(r.id); onChanged(); }} aria-label="Remove entry" className="text-muted active:scale-90 hover:text-ember"><Trash2 size={15} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WaterSettings({ userId, goals, goal, presets, suggestion, onChanged, flash }) {
+  const [g, setG] = useState(String(goal));
+  const [list, setList] = useState(presets);
+  const [newP, setNewP] = useState({ label: "", ml: "" });
+  const [rem, setRem] = useState({
+    on: !!(goals && goals.water_reminders),
+    every: (goals && goals.water_every_h) || 2,
+    from: (goals && goals.water_from_h) ?? 9,
+    to: (goals && goals.water_to_h) ?? 21,
+  });
+  const [busy, setBusy] = useState(false);
+
+  async function save(extra = {}) {
+    setBusy(true);
+    await saveGoals(userId, {
+      ...goals,
+      water_goal_ml: Math.max(200, Number(g) || DEFAULT_WATER_GOAL),
+      water_presets: list,
+      water_reminders: rem.on,
+      water_every_h: Number(rem.every) || 2,
+      water_from_h: Number(rem.from),
+      water_to_h: Number(rem.to),
+      water_tz_min: -new Date().getTimezoneOffset(),   // so nudges land in your local window
+      ...extra,
+    });
+    setBusy(false); onChanged();
+    flash && flash("Hydration settings saved");
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="eyebrow mb-1">Daily goal</p>
+        <div className="flex items-center gap-2">
+          <input className="inp flex-1" inputMode="numeric" value={g} onChange={(e) => setG(e.target.value.replace(/[^0-9]/g, ""))} />
+          <span className="text-sm text-muted">ml</span>
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {[2000, 2500, 3000, 3500].map((v) => (
+            <button key={v} onClick={() => setG(String(v))} className={"pill text-[11px] " + (Number(g) === v ? "pill-on" : "")}>{v}</button>
+          ))}
+        </div>
+        {suggestion.extra > 0 && (
+          <button onClick={() => setG(String(suggestion.goal))} className="mt-1.5 text-left text-[11px] text-mint">
+            Today you trained and ate well — {suggestion.goal} ml suits today better. Tap to use it.
+          </button>
+        )}
+      </div>
+
+      <div>
+        <p className="eyebrow mb-1">Your containers</p>
+        <div className="space-y-1.5">
+          {list.map((p, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+              <input className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none" value={p.label}
+                onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+              <input className="w-20 rounded-lg bg-surface px-2 py-1.5 text-center text-paper outline-none" inputMode="numeric" value={p.ml}
+                onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, ml: Number(e.target.value.replace(/[^0-9]/g, "")) || 0 } : x)))} />
+              <span className="text-[11px] text-muted">ml</span>
+              <button onClick={() => setList(list.filter((_, j) => j !== i))} aria-label="Remove container" className="text-muted active:scale-90 hover:text-ember"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-1.5 flex items-center gap-2">
+          <input className="inp flex-1" value={newP.label} onChange={(e) => setNewP({ ...newP, label: e.target.value })} placeholder="e.g. My bottle" />
+          <input className="inp w-24" inputMode="numeric" value={newP.ml} onChange={(e) => setNewP({ ...newP, ml: e.target.value.replace(/[^0-9]/g, "") })} placeholder="750" />
+          <button className="pill px-3 py-2.5" disabled={!newP.label.trim() || !newP.ml}
+            onClick={() => { setList([...list, { label: newP.label.trim(), ml: Number(newP.ml) }]); setNewP({ label: "", ml: "" }); }}><Plus size={14} /></button>
+        </div>
+      </div>
+
+      <div>
+        <p className="eyebrow mb-1 flex items-center gap-1"><Bell size={12} /> Reminders</p>
+        <label className="flex items-center gap-2 rounded-xl bg-surface2 px-3 py-2.5">
+          <input type="checkbox" checked={rem.on} onChange={(e) => setRem({ ...rem, on: e.target.checked })} className="h-4 w-4 accent-gold" />
+          <span className="text-sm font-bold">Nudge me to drink</span>
+        </label>
+        {rem.on && (
+          <div className="mt-2 space-y-2">
+            <div>
+              <p className="text-[11px] text-muted">Every</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {[1, 2, 3, 4].map((h) => (
+                  <button key={h} onClick={() => setRem({ ...rem, every: h })} className={"pill text-[11px] " + (Number(rem.every) === h ? "pill-on" : "")}>{h}h</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="flex-1"><span className="text-[11px] text-muted">From</span>
+                <input className="inp py-2 text-center" inputMode="numeric" value={rem.from} onChange={(e) => setRem({ ...rem, from: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+              <label className="flex-1"><span className="text-[11px] text-muted">Until</span>
+                <input className="inp py-2 text-center" inputMode="numeric" value={rem.to} onChange={(e) => setRem({ ...rem, to: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+            </div>
+            <p className="text-[11px] text-muted">Local hours, 24h clock. You'll only be nudged if you're behind your goal, and never after you've hit it. Push notifications must be on in Profile.</p>
+          </div>
+        )}
+      </div>
+
+      <button className="btn-primary w-full py-3.5" disabled={busy} onClick={() => save()}>{busy ? "Saving…" : "Save hydration settings"}</button>
+    </div>
+  );
+}
+
+function WaterHistory({ insights, goal }) {
+  const max = Math.max(goal, ...insights.series.map((d) => d.ml), 1) * 1.1;
+  const H = 90;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="panel py-2"><p className="font-score text-base font-bold text-mint">{insights.avg}</p><p className="text-[9px] text-muted">avg ml/day</p></div>
+        <div className="panel py-2"><p className="font-score text-base font-bold">{insights.daysHit}</p><p className="text-[9px] text-muted">days goal hit</p></div>
+        <div className="panel py-2"><p className="font-score text-base font-bold text-gold">{insights.streak}</p><p className="text-[9px] text-muted">day streak</p></div>
+      </div>
+
+      <div className="rounded-2xl bg-surface2 p-3">
+        <svg viewBox={`0 0 280 ${H + 16}`} className="w-full">
+          <line x1="0" x2="280" y1={H - (goal / max) * H} y2={H - (goal / max) * H} stroke="rgb(var(--c-mint))" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.7" />
+          {insights.series.map((d, i) => {
+            const w = 26, gap = 14, x = i * (w + gap) + 6;
+            const h = (d.ml / max) * H;
+            return (
+              <g key={d.iso}>
+                <rect x={x} y={H - h} width={w} height={Math.max(0, h)} rx="5" fill="rgb(var(--c-mint))" opacity={d.ml >= goal ? 0.95 : 0.45} />
+                <text x={x + w / 2} y={H + 12} textAnchor="middle" fontSize="9" fill="rgb(var(--c-muted))">{d.day}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <p className="text-[11px] text-muted">Solid bars are days you hit the goal. The dashed line is your target.</p>
     </div>
   );
 }

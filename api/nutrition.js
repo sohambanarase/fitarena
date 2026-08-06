@@ -73,10 +73,12 @@ async function assist(b, key, res) {
     "carbs: " + r0(c.carbs) + "g, fat: " + r0(c.fat) + "g.",
     c.caloriesGoal ? "Calories remaining: " + Math.round(c.caloriesGoal - (c.calories || 0)) + "." : "",
     c.proteinGoal ? "Protein remaining: " + Math.round(c.proteinGoal - (c.protein || 0)) + "g." : "",
+    c.waterMl != null ? "Water: " + r0(c.waterMl) + " ml" + (c.waterGoalMl ? " of a " + c.waterGoalMl + " ml goal" : "") + "." : "",
   ].filter(Boolean).join(" ");
   const prompt = [
     "You are a practical nutrition coach inside a gym app. Answer using their live numbers below.",
     "Be specific and numbers-first. For food ideas give 2-3 concrete options with rough macros. Under 90 words. At most one emoji. No preamble.",
+    "If hydration is clearly behind and relevant to what they asked, mention it in one short clause - do not lecture.",
     "", "THEIR DAY: " + ctx, "", "QUESTION: " + q,
   ].join("\n");
   const r = await gemini(key, [{ text: prompt }], 260, 0.5);
