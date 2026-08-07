@@ -1,20 +1,46 @@
+# Fires FitArena notifications (daily reminder, win/join/overtake nudges, water reminders).
+# Runs every ~30 min. Costs a few free Action minutes a month.
+#
+# ONE-TIME SETUP — add these repo secrets (Settings → Secrets and variables → Actions):
+#   NOTIFY_URL     = https://YOUR-APP.vercel.app/api/notify   (use your CURRENT domain!)
+#   NOTIFY_SECRET  = the same random string you set in Vercel env
+#
+# NOTE: GitHub sometimes fails to hand out a hosted runner ("The job was not acquired by
+# Runner of type hosted"). That's on GitHub's side, not this workflow. The retry below and
+# the extra schedule entries mean a missed slot is picked up on the next pass rather than
+# skipping the notification entirely.
 name: fitarena-notify
-
 on:
   schedule:
     - cron: "*/30 * * * *"
-  workflow_dispatch:
+    - cron: "17,47 * * * *"   # offset backup pass, in case the :00/:30 runners are unavailable
+  workflow_dispatch: {}
+
+concurrency:
+  group: fitarena-notify
+  cancel-in-progress: false
 
 jobs:
   notify:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
       - name: Trigger sender
-        run: |
-          echo "Calling notify endpoint..."
-          resp=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "$NOTIFY_URL?secret=$NOTIFY_SECRET")
-          echo "Response: $resp"
         env:
           NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
           NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
+        run: |
+          if [ -z "$NOTIFY_URL" ] || [ -z "$NOTIFY_SECRET" ]; then
+            echo "::error::NOTIFY_URL or NOTIFY_SECRET is not set in repo secrets."
+            exit 1
+          fi
+          echo "Calling notify endpoint…"
+          # --retry rides out cold starts and brief 5xx from the serverless function
+          resp=$(curl -sS --max-time 60 --retry 3 --retry-delay 5 --retry-all-errors \
+                 -w "\nHTTP_STATUS:%{http_code}" "$NOTIFY_URL?secret=$NOTIFY_SECRET") || true
+          echo "Response: $resp"
+          if echo "$resp" | grep -q "HTTP_STATUS:200"; then
+            echo "OK"
+          else
+            echo "::warning::Not a 200 — check NOTIFY_URL (current domain?) and NOTIFY_SECRET."
+          fi
