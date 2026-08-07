@@ -690,3 +690,35 @@ Assets in `public/icons/`:
 
 The mark also now appears on the sign-in screen. Icon caches are stubborn: if the old icon lingers on
 your phone, remove the home-screen shortcut and re-add it after deploying.
+
+---
+
+## v19 — sign in with an email code, set a new password from Profile
+
+No migration. One Supabase dashboard change (below), then push.
+
+### Sign in with an email link
+The sign-in screen has **"Email me a link"** next to the password option. Enter your email, tap the
+link in it, you're in. Resend unlocks after 45 seconds.
+
+**Why a link and not a 6-digit code:** Supabase's default email template contains only the link (no
+`{{ .Token }}`), and since June 2026 free projects can't edit templates without custom SMTP. The code
+flow is fully built and sitting behind one switch — if you ever add custom SMTP, set
+`EMAIL_CODES = true` at the top of `src/screens/AuthScreen.jsx` and add this to the Magic Link
+template, and the code step appears:
+
+```
+<p>Your FitArena code: <strong>{{ .Token }}</strong></p>
+<p>Or just tap this link: <a href="{{ .ConfirmationURL }}">Sign in</a></p>
+```
+
+Note: without custom SMTP, Supabase only delivers auth email to addresses in your project's team, and
+caps the default sender at a couple of messages an hour. Password sign-in is unaffected — it needs no
+email at all — so that stays the main route for the crew.
+
+### Change your password
+**Profile → Password.** Since you're already signed in, it doesn't ask for the old one — type a new
+password twice and save. Minimum 8 characters, and the button stays disabled until both fields match.
+
+Handy combination: if you ever forget your password entirely, sign in with an email code and then set
+a new password here.

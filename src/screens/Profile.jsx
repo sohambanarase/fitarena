@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 import { loadGroupWins, bestPRs } from "../lib/achievements.js";
-import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft, Flower2, Timer} from "lucide-react";
+import { LogOut, Trophy, Moon, Sun, Bell, HelpCircle, ChevronRight, ChevronLeft, Flower2, Timer, KeyRound} from "lucide-react";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
 import { currentStreak, consistencyScore, toISO } from "../lib/streak.js";
@@ -24,6 +24,7 @@ export default function Profile() {
   const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState(currentTheme());
   const [timers, setTimers] = useState(loadTimerPrefs());
+  const [pw, setPw] = useState({ next: "", confirm: "", busy: false, msg: null, open: false });
   const setTimer = (k, v) => { const next = { ...timers, [k]: Math.max(0, Math.floor(Number(v) || 0)) }; setTimers(next); saveTimerPrefs(next); };
   const switchTheme = (t) => { applyTheme(t); setTheme(t); };
   const [pushState, setPushState] = useState("loading");
@@ -149,6 +150,39 @@ export default function Profile() {
           </button>
         </div>
         <p className="mt-1.5 text-[11px] text-muted">Bloom is a soft, colourful daylight theme.</p>
+      </div>
+
+      <div className="card">
+        <button onClick={() => setPw((x) => ({ ...x, open: !x.open, msg: null }))} className="flex w-full items-center justify-between">
+          <span className="eyebrow flex items-center gap-1"><KeyRound size={13} /> Password</span>
+          <ChevronRight size={16} className={"text-muted transition-transform " + (pw.open ? "rotate-90" : "")} />
+        </button>
+        {pw.open && (
+          <div className="mt-2 space-y-2">
+            <p className="text-[11px] text-muted">Set a new one straight away — you're already signed in, so we don't ask for the old one.</p>
+            <input type="password" autoComplete="new-password" className="inp" placeholder="New password (8+ characters)"
+              value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value, msg: null })} />
+            <input type="password" autoComplete="new-password" className="inp" placeholder="Repeat it"
+              value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value, msg: null })} />
+            {pw.msg && <p className={"text-sm " + (pw.msg.ok ? "text-mint" : "text-ember")}>{pw.msg.text}</p>}
+            <button
+              className="btn-primary w-full py-3"
+              disabled={pw.busy || pw.next.length < 8 || pw.next !== pw.confirm}
+              onClick={async () => {
+                setPw((x) => ({ ...x, busy: true, msg: null }));
+                const { error } = await supabase.auth.updateUser({ password: pw.next });
+                setPw((x) => ({
+                  ...x, busy: false, next: error ? x.next : "", confirm: error ? x.confirm : "",
+                  msg: error ? { ok: false, text: error.message } : { ok: true, text: "Password updated. Use it next time you sign in." },
+                }));
+              }}
+            >
+              {pw.busy ? "Saving…" : "Set new password"}
+            </button>
+            {pw.next && pw.next.length < 8 && <p className="text-[11px] text-muted">A bit longer — 8 characters minimum.</p>}
+            {pw.confirm && pw.next !== pw.confirm && <p className="text-[11px] text-ember">The two don't match yet.</p>}
+          </div>
+        )}
       </div>
 
       <div className="card">
