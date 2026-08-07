@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { loadExercises, imageUrl, imageFallback, facets, filterExercises } from "../lib/exercises.js";
 import Loader from "../components/Loader.jsx";
 import { Search, X } from "lucide-react";
 import ScreenHeader from "../components/ScreenHeader.jsx";
 import Sheet from "../components/Sheet.jsx";
+import ExerciseInfoSheet from "../components/ExerciseInfoSheet.jsx";
 
 export default function Playbook() {
+  const navigate = useNavigate();
   const [all, setAll] = useState(null);
   const [q, setQ] = useState("");
   const [muscle, setMuscle] = useState("");
@@ -60,7 +63,7 @@ export default function Playbook() {
         <button className="btn-primary w-full" onClick={() => setLimit((l) => l + 30)}>Load more</button>
       )}
 
-      {open && <Detail ex={open} onClose={() => setOpen(null)} />}
+      {open && <ExerciseInfoSheet onLog={(e) => navigate("/grind", { state: { logExercise: e.name } })} ex={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }

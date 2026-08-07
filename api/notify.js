@@ -30,6 +30,7 @@ function leaderboard(memberIds, logs, wins, goalOf, weekStart) {
 }
 
 export default async function handler(req, res) {
+  let hydrationError = null;
   const secret = (req.query && req.query.secret) || req.headers["x-notify-secret"];
   if (!process.env.NOTIFY_SECRET || secret !== process.env.NOTIFY_SECRET)
     return res.status(401).json({ error: "unauthorized" });
@@ -145,7 +146,8 @@ export default async function handler(req, res) {
   }
 
   // 5) HYDRATION NUDGES (only while behind the goal, inside the user's own local window)
-  {
+  // Wrapped: if the v15 water columns aren't there yet, skip it rather than failing the run.
+  try {
     const { data: hyd } = await db.from("nutrition_goals")
       .select("user_id, water_goal_ml, water_every_h, water_from_h, water_to_h, water_tz_min, water_last_ping")
       .eq("water_reminders", true);
@@ -168,6 +170,8 @@ export default async function handler(req, res) {
       queue.push({ userIds: [row.user_id], title: "Water break 💧", body: left + " ml to go today. Grab a glass.", tag: "water" });
       await db.from("nutrition_goals").update({ water_last_ping: now.toISOString() }).eq("user_id", row.user_id);
     }
+  } catch (e) {
+    hydrationError = String((e && e.message) || e).slice(0, 120);
   }
 
   // SEND
@@ -187,5 +191,5 @@ export default async function handler(req, res) {
   }
 
   await db.from("notify_state").upsert({ id: 1, state, updated_at: nowISO });
-  return res.json({ ok: true, queued: queue.length, sent, pruned });
+  return res.json({ ok: true, queued: queue.length, sent, pruned, ...(hydrationError ? { hydrationSkipped: hydrationError } : {}) });
 }

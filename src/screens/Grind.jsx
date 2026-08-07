@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { loadExercises, imageUrl, imageFallback } from "../lib/exercises.js";
 import {
@@ -6,16 +7,17 @@ import {
   logExercise, loadEntries, removeEntry, setsOf,
   loadPlans, savePlan, deletePlan, logPlan,
   loadCustomExercises, addCustomExercise, updateEntry,
-  saveSession, loadSessionSeconds,
+  saveSession, loadSessionSeconds, setSessionSeconds,
 } from "../lib/grind.js";
 import { loadTimerPrefs } from "../lib/timerPrefs.js";
+import ExerciseInfoSheet from "../components/ExerciseInfoSheet.jsx";
 import { toISO, startOfWeekISO } from "../lib/streak.js";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
 import ScreenHeader from "../components/ScreenHeader.jsx";
 import Loader from "../components/Loader.jsx";
 import { Timer, Copy as CopyIcon } from "lucide-react";
-import { Plus, Target, Trash2, Check, ChevronLeft, ChevronRight, Search, X, Lock, Dumbbell, Copy, Play, Pencil, Layers, TrendingUp, LineChart} from "lucide-react";
+import { Plus, Target, Trash2, Check, ChevronLeft, ChevronRight, Search, X, Lock, Dumbbell, Copy, Play, Pencil, Layers, TrendingUp, LineChart, Info} from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 const shiftISO = (iso, d) => { const [y, m, dd] = iso.split("-").map(Number); return toISO(new Date(y, m - 1, dd + d)); };
@@ -54,16 +56,22 @@ function SearchBox({ value, onChange, placeholder, autoFocus }) {
     </div>
   );
 }
-function ExRow({ ex, onClick, right }) {
+function ExRow({ ex, onClick, right, onInfo }) {
   return (
-    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl bg-surface2 px-3 py-2 text-left active:scale-[.99]">
-      <Thumb ex={ex} />
-      <span className="flex-1 truncate text-sm capitalize">{ex.name}</span>
+    <div className="flex w-full items-center gap-2 rounded-xl bg-surface2 px-3 py-2">
+      <button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left active:scale-[.99]">
+        <Thumb ex={ex} />
+        <span className="min-w-0 flex-1 truncate text-sm capitalize">{ex.name}</span>
+      </button>
       {right}
-    </button>
+      {onInfo && (
+        <button onClick={() => onInfo(ex)} aria-label={"About " + ex.name}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface text-muted active:scale-90"><Info size={14} /></button>
+      )}
+    </div>
   );
 }
-function ExerciseSearch({ exercises, onPick, placeholder = "Search exercises", autoFocus }) {
+function ExerciseSearch({ exercises, onPick, onInfo, placeholder = "Search exercises", autoFocus }) {
   const [q, setQ] = useState("");
   const matches = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -74,7 +82,7 @@ function ExerciseSearch({ exercises, onPick, placeholder = "Search exercises", a
     <div className="space-y-2">
       <SearchBox value={q} onChange={setQ} placeholder={placeholder} autoFocus={autoFocus} />
       <div className="max-h-72 space-y-1 overflow-y-auto">
-        {matches.map((e) => <ExRow key={e.id} ex={e} onClick={() => onPick(e)} right={<span className="text-[11px] capitalize text-muted">{e.muscle}</span>} />)}
+        {matches.map((e) => <ExRow key={e.id} ex={e} onClick={() => onPick(e)} onInfo={onInfo} right={<span className="text-[11px] capitalize text-muted">{e.muscle}</span>} />)}
         {q && matches.length === 0 && <p className="px-1 text-sm text-muted">No match.</p>}
       </div>
     </div>
@@ -108,6 +116,9 @@ export default function Grind() {
   const [editPlan, setEditPlan] = useState(undefined); // undefined=closed, null=new, obj=edit
   const [logQueue, setLogQueue] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [logStartEx, setLogStartEx] = useState(null);   // exercise to open the log flow on
+  const location = useLocation();
+  const navigate = useNavigate();
   const [toast, setToast] = useState(null);
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
   const [logStart, setLogStart] = useState(0);
@@ -121,6 +132,18 @@ export default function Grind() {
     try { localStorage.removeItem("fitarena.session"); } catch {}
     setSessionStart(null);
     if (startedAt) { await saveSession(user.id, (Date.now() - startedAt) / 1000); refreshSessions(); }
+  };
+  // Arriving from the Playbook's "Log this exercise" button
+  useEffect(() => {
+    const name = location.state && location.state.logExercise;
+    if (!name) return;
+    setLogQueue(null); setLogStartEx(name); setLogging(true);
+    navigate(location.pathname, { replace: true, state: null });   // don't re-fire on back
+  }, [location.state]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const applyLoggedTime = async (seconds) => {
+    await setSessionSeconds(user.id, date, seconds);
+    refreshSessions();
   };
   const editSession = (seconds) => {
     const t = Date.now() - Math.max(0, seconds) * 1000;   // shift the start so the clock reads `seconds`
@@ -169,7 +192,7 @@ export default function Grind() {
         <div className="glass flex-1 rounded-2xl px-3 py-2.5"><p className="eyebrow">Exercises wk</p><p className="font-score text-xl font-bold text-gold"><CountUp value={entries.filter((e) => e.log_date >= ws).length} /></p></div>
       </div>
 
-      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} loggedSecs={daySeconds} />
+      <SessionBar start={sessionStart} onStart={startSession} onStop={stopSession} onEdit={editSession} onSetLogged={applyLoggedTime} loggedSecs={daySeconds} />
 
       {/* Log / Planner switch */}
       <div className="glass grid grid-cols-2 gap-1 rounded-2xl p-1">
@@ -283,7 +306,7 @@ export default function Grind() {
         </div>
       )}
       {showHistory && <ExerciseHistorySheet userId={user.id} onClose={() => setShowHistory(false)} />}
-      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} lastByExercise={lastByExercise} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
+      {logging && <LogFlow userId={user.id} date={date} exercises={exercises} registerCustom={registerCustom} queue={logQueue} startExercise={logStartEx} doneNames={entries.filter((e) => e.log_date === date).map((e) => e.exercise.toLowerCase())} lastByExercise={lastByExercise} startSession={startSession} onClose={() => { setLogging(false); setLogQueue(null); refreshSessions(); }} onDone={load} />}
       {detail && <EntryDetail entry={detail} userId={user.id} onClose={() => setDetail(null)} onSaved={load} onDeleted={load} />}
       {editPlan !== undefined && <PlanEditor userId={user.id} exercises={exercises} exByName={exByName} registerCustom={registerCustom} plan={editPlan} onClose={() => setEditPlan(undefined)} onDone={load} />}
     </div>
@@ -390,97 +413,132 @@ function fmtClock(s) {
 }
 
 // Session timer bar — manual start, auto-starts on first logged set, stop when done.
-function SessionBar({ start, onStart, onStop, onEdit, loggedSecs }) {
+function SessionBar({ start, onStart, onStop, onEdit, onSetLogged, loggedSecs }) {
   const [now, setNow] = useState(Date.now());
-  const [editing, setEditing] = useState(false);
-  useEffect(() => { if (!start) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [start]);
+  const [editing, setEditing] = useState(null);   // "clock" | "logged" | null
+  useEffect(() => {
+    if (!start) return;
+    setNow(Date.now());                    // snap immediately so an edit shows its exact value
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [start]);
   const s = start ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
+  const loggedMin = Math.round((loggedSecs || 0) / 60);
 
   return (
-    <>
+    <div className="space-y-1.5">
       {!start ? (
         <div className="flex items-center gap-2">
           <button onClick={onStart} className="glass flex flex-1 items-center justify-center gap-2 rounded-2xl py-2.5 text-sm font-bold text-muted active:scale-[.99]">
-            <Timer size={15} /> Start gym session{loggedSecs > 0 ? " · " + Math.round(loggedSecs / 60) + " min logged today" : ""}
+            <Timer size={15} /> Start gym session
           </button>
-          <button onClick={() => setEditing(true)} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
+          <button onClick={() => setEditing("clock")} aria-label="Edit session time" className="glass grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-muted active:scale-90"><Pencil size={15} /></button>
         </div>
       ) : (
         <div className="glass flex items-center justify-between rounded-2xl px-4 py-2.5">
           <span className="flex items-center gap-2 font-bold text-gold"><Timer size={16} className="animate-pulse-soft" /> Session {fmtClock(s)}</span>
           <div className="flex items-center gap-2">
-            <button onClick={() => setEditing(true)} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
+            <button onClick={() => setEditing("clock")} aria-label="Edit session time" className="grid h-7 w-7 place-items-center rounded-full bg-surface2 text-muted active:scale-90"><Pencil size={13} /></button>
             <button onClick={onStop} className="rounded-full bg-ember px-4 py-1.5 text-xs font-bold text-ink active:scale-95">Stop</button>
           </div>
         </div>
       )}
-      {editing && (
+
+      {/* the day's banked total — tap to correct it */}
+      <button onClick={() => setEditing("logged")} aria-label="Edit time logged today"
+        className="flex w-full items-center justify-center gap-1 text-[11px] font-semibold text-muted active:scale-[.98]">
+        {loggedMin > 0 ? loggedMin + " min logged today" : "No time logged today"} <Pencil size={11} />
+      </button>
+
+      {editing === "clock" && (
         <SessionEditSheet
-          seconds={s}                              /* read once on open; the sheet won't re-sync while you type */
-          running={!!start}
-          onClose={() => setEditing(false)}
-          onApply={(sec) => { onEdit(sec); setEditing(false); }}
+          seconds={s}
+          title={start ? "Edit session time" : "Set session time"}
+          blurb={start
+            ? "Type the total time you want on the clock. It replaces what's there, it doesn't add to it."
+            : "Start the session already part-way through, if you forgot to start it earlier."}
+          cta={(t) => (start ? "Set timer to " + t : "Start session at " + t)}
+          onClose={() => setEditing(null)}
+          onApply={(sec) => { onEdit(sec); setEditing(null); }}
         />
       )}
-    </>
+      {editing === "logged" && (
+        <SessionEditSheet
+          seconds={loggedSecs || 0}
+          title="Time logged today"
+          blurb="This is the total gym time saved for today. Type the figure you want and it replaces the total — it doesn't add to it."
+          cta={(t) => "Save " + t + " for today"}
+          onClose={() => setEditing(null)}
+          onApply={(sec) => { onSetLogged(sec); setEditing(null); }}
+        />
+      )}
+    </div>
   );
 }
 
-function SessionEditSheet({ seconds, running, onClose, onApply }) {
-  // Fields hold raw text while typing (no re-formatting mid-keystroke, which fights
-  // the cursor on phones); they're normalised on blur.
-  const [h, setH] = useState(String(Math.floor(seconds / 3600)));
-  const [m, setM] = useState(String(Math.floor((seconds % 3600) / 60)));
-  const [sc, setSc] = useState(String(seconds % 60));
+function SessionEditSheet({ seconds, title, blurb, cta, onClose, onApply }) {
+  // One field for the WHOLE time in minutes, so typing 10 means 10 minutes total —
+  // never added to what's already there. Tapping a field clears it, because mobile
+  // Safari ignores select-on-focus and typed digits would otherwise be appended.
+  const [mins, setMins] = useState(String(Math.floor(seconds / 60)));
+  const [secs, setSecs] = useState(String(seconds % 60));
+  const prior = useRef({});
+  const secsTouched = useRef(false);
 
-  const val = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
-  // minutes/seconds may be over 59 while typing (e.g. "90"); they roll over on blur
-  const total = Math.min(24 * 3600 - 1, val(h, 23) * 3600 + val(m, 599) * 60 + val(sc, 599));
+  const n = (t, max) => Math.max(0, Math.min(max, parseInt(t || "0", 10) || 0));
+  const total = Math.min(24 * 3600 - 1, n(mins, 1439) * 60 + n(secs, 59));
 
-  const onDigits = (setter) => (e) => setter(e.target.value.replace(/[^0-9]/g, "").slice(0, 3));
-  const fromTotal = (t) => {
+  const setFromTotal = (t) => {
     const x = Math.max(0, Math.min(24 * 3600 - 1, Math.round(t)));
-    setH(String(Math.floor(x / 3600))); setM(String(Math.floor((x % 3600) / 60))); setSc(String(x % 60));
+    setMins(String(Math.floor(x / 60))); setSecs(String(x % 60));
   };
 
-  const fields = [["Hours", h, setH], ["Min", m, setM], ["Sec", sc, setSc]];
+  const field = (key, value, setter, max, cls) => (
+    <input
+      inputMode="numeric"
+      value={value}
+      placeholder={prior.current[key] != null ? prior.current[key] : "0"}
+      onFocus={() => { prior.current[key] = value; setter(""); if (key === "secs") secsTouched.current = true; }}
+      onChange={(e) => {
+        setter(e.target.value.replace(/[^0-9]/g, "").slice(0, key === "mins" ? 4 : 2));
+        // typing a minute value means e.g. 10:00 — drop stale seconds unless they were set on purpose
+        if (key === "mins" && !secsTouched.current) setSecs("0");
+      }}
+      onBlur={() => setter(value === "" ? (prior.current[key] != null ? prior.current[key] : "0") : String(n(value, max)))}
+      className={"inp text-center font-score font-bold " + cls}
+    />
+  );
 
   return (
-    <Sheet title={running ? "Edit session time" : "Set session time"} onClose={onClose}>
+    <Sheet title={title} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-sm text-muted">
-          {running
-            ? "Set the elapsed time by hand and it keeps counting from there. Handy if you forgot to start or stop it."
-            : "Start the session already part-way through, if you forgot to start it earlier."}
-        </p>
+        <p className="text-sm text-muted">{blurb}</p>
 
-        <div className="flex items-end justify-center gap-2">
-          {fields.map(([label, value, setter]) => (
-            <div key={label} className="text-center">
-              <input
-                inputMode="numeric"
-                value={value}
-                onFocus={(e) => e.target.select()}
-                onChange={onDigits(setter)}
-                onBlur={() => fromTotal(total)}   /* normalises 90 min into 1h 30m */
-                className="inp w-20 py-3 text-center font-score text-2xl font-bold"
-              />
-              <p className="mt-1 text-[10px] text-muted">{label}</p>
-            </div>
-          ))}
+        <div className="flex items-end justify-center gap-3">
+          <div className="text-center">
+            {field("mins", mins, setMins, 1439, "w-32 py-3 text-3xl")}
+            <p className="mt-1 text-[10px] text-muted">Total minutes</p>
+          </div>
+          <div className="text-center">
+            {field("secs", secs, setSecs, 59, "w-20 py-3 text-xl")}
+            <p className="mt-1 text-[10px] text-muted">Seconds</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap justify-center gap-1.5">
-          {[-10, -5, -1, 1, 5, 10].map((n) => (
-            <button key={n} onClick={() => fromTotal(total + n * 60)} className="pill text-[11px]">{n > 0 ? "+" : ""}{n}m</button>
+          {[-10, -5, -1, 1, 5, 10].map((v) => (
+            <button key={v} onClick={() => setFromTotal(total + v * 60)} className="pill text-[11px]">{v > 0 ? "+" : ""}{v}m</button>
           ))}
-          <button onClick={() => fromTotal(0)} className="pill text-[11px]">reset</button>
+        </div>
+        <div className="flex justify-center gap-1.5">
+          {[30, 45, 60, 90].map((v) => (
+            <button key={v} onClick={() => setFromTotal(v * 60)} className="pill text-[11px]">{v}m</button>
+          ))}
+          <button onClick={() => setFromTotal(0)} className="pill text-[11px] !text-ember">Clear to 0:00</button>
         </div>
 
         <p className="text-center font-score text-2xl font-bold text-gold">{fmtClock(total)}</p>
-        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>
-          {running ? "Set timer to " + fmtClock(total) : "Start session at " + fmtClock(total)}
-        </button>
+        <button className="btn-primary w-full py-3.5" onClick={() => onApply(total)}>{cta(fmtClock(total))}</button>
       </div>
     </Sheet>
   );
@@ -488,6 +546,7 @@ function SessionEditSheet({ seconds, running, onClose, onApply }) {
 
 // Shared exercise picker: search + custom + body-part tiles → category list.
 function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
+  const [info, setInfo] = useState(null);
   const [mode, setMode] = useState("root"); // root | cat | custom
   const [cat, setCat] = useState(null);
   const [exQ, setExQ] = useState("");
@@ -530,20 +589,22 @@ function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
       <button onClick={() => { setMode("root"); setExQ(""); }} className="pill">← Categories</button>
       <SearchBox value={exQ} onChange={setExQ} placeholder={"Search in " + cat.key} autoFocus />
       <div className="max-h-80 space-y-1 overflow-y-auto">
-        {catExercises.map((e) => <ExRow key={e.id} ex={e} onClick={() => onPick(e)} />)}
+        {catExercises.map((e) => <ExRow key={e.id} ex={e} onClick={() => onPick(e)} onInfo={setInfo} />)}
         {catExercises.length === 0 && <p className="text-sm text-muted">No match in {cat.key}.</p>}
       </div>
+      {info && <ExerciseInfoSheet ex={info} onClose={() => setInfo(null)} onLog={(e) => { setInfo(null); onPick(e); }} logLabel="Log this now" />}
     </div>
   );
 
   return (
     <div className="space-y-3">
-      <ExerciseSearch exercises={exercises} onPick={onPick} placeholder="Search any exercise" />
+      <ExerciseSearch exercises={exercises} onPick={onPick} onInfo={setInfo} placeholder="Search any exercise" />
       <button onClick={() => setMode("custom")} className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-gold/50 py-3 text-sm font-bold text-gold active:scale-95"><Plus size={16} /> Add a custom exercise</button>
       <p className="eyebrow">or pick a body part</p>
       <div className="grid grid-cols-2 gap-2">
         {CATS.map((c) => <button key={c.key} onClick={() => { setCat(c); setExQ(""); setMode("cat"); }} className="glass flex h-16 items-center justify-center rounded-2xl font-display text-lg uppercase tracking-wide active:scale-95">{c.key}</button>)}
       </div>
+      {info && <ExerciseInfoSheet ex={info} onClose={() => setInfo(null)} onLog={(e) => { setInfo(null); onPick(e); }} logLabel="Log this now" />}
     </div>
   );
 }
@@ -551,7 +612,7 @@ function ExercisePicker({ exercises, userId, registerCustom, onPick }) {
 // Unified log engine. Normal mode: pick → sets → entry. Plan mode (queue): walks the
 // plan exercise-by-exercise, pre-filling each set with the target (editable), with rest
 // timers between sets AND between exercises. Auto-starts the session on the first set.
-function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [], lastByExercise = {}, startSession, onClose, onDone }) {
+function LogFlow({ userId, date, exercises, registerCustom, queue, startExercise = null, doneNames = [], lastByExercise = {}, startSession, onClose, onDone }) {
   const isPlan = Array.isArray(queue) && queue.length > 0;
   const exByNameLocal = useMemo(() => { const m = {}; exercises.forEach((e) => (m[e.name.toLowerCase()] = e)); return m; }, [exercises]);
   const resolveEx = useCallback((name, i) => exByNameLocal[name.toLowerCase()] || { id: "q" + i, name, images: [], muscle: "" }, [exByNameLocal]);
@@ -585,7 +646,11 @@ function LogFlow({ userId, date, exercises, registerCustom, queue, doneNames = [
   }, []);
 
   // plan mode: jump straight into the first exercise
-  useEffect(() => { setStep(isPlan ? "chooser" : "pick"); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    if (startExercise) { pickExercise(resolveEx(startExercise, 0)); return; }   // deep-linked from the Playbook
+    setStep(isPlan ? "chooser" : "pick");
+    /* eslint-disable-next-line */
+  }, []);
   function beginPlanExercise(i) { const it = queue[i]; setQIdx(i); enterEntry(resolveEx(it.exercise, i), Number(it.sets) || 3, { weight: it.weight, reps: it.reps }); }
 
   const prefill = (tgt) => { setW(tgt && tgt.weight != null && tgt.weight !== "" ? String(tgt.weight) : ""); setR(tgt && tgt.reps != null && tgt.reps !== "" ? String(tgt.reps) : ""); };
