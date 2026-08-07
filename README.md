@@ -659,3 +659,34 @@ plan (using your top set for each exercise as the target), ready in the Planner 
 After an AI estimate, tick **Save this as a food**. Give the portion weight and it's stored per 100g so
 you can re-log it later at any amount on the scale. Leave the weight blank and it's saved as one
 100 g portion. The logged entry links to the new food, so it shows up in recents too.
+
+---
+
+## v18 — new lotus logo + full icon set
+
+No migration. Push the code.
+
+The uploaded lotus artwork is now the app's identity. The original was a 434px PNG on a solid white
+background; it's been rebuilt as a clean asset set:
+
+- **Background removed properly.** The white was cut using connected-region detection rather than a
+  colour key, so the meditating figure (which is also white) stays fully intact — no holes, and no
+  pale halo when it sits on a dark screen.
+- **Resolution lifted** by resampling at 1600px with light unsharp before the cut, then trimming and
+  re-centring, so every size is generated from one crisp 1024px master rather than the small original.
+
+Assets in `public/icons/`:
+
+| File | Use |
+|---|---|
+| `logo.png` | 1024px transparent master — use anywhere |
+| `icon-192.png`, `icon-512.png` | PWA icons, transparent |
+| `icon-512-maskable.png` | Android maskable, dark backdrop, art inside the safe zone |
+| `apple-touch-icon.png` | iOS home screen (opaque — iOS doesn't handle transparency) |
+| `favicon-16/32.png`, `/favicon.ico` | browser tabs, cropped to the flower so it reads when tiny |
+| `icon-flower-512.png` | tighter alternative icon, no rising beads |
+| `logo-mono-white.png`, `logo-mono-ink.png` | one-colour knockouts for stamps and watermarks |
+| `og-image.png` | 1200×630 social/share card |
+
+The mark also now appears on the sign-in screen. Icon caches are stubborn: if the old icon lingers on
+your phone, remove the home-screen shortcut and re-add it after deploying.

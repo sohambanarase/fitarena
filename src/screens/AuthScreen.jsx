@@ -39,6 +39,7 @@ export default function AuthScreen() {
   return (
     <div className="phone justify-center px-6">
       <div className="mb-8 text-center">
+        <img src="/icons/logo.png" alt="" width="112" height="112" className="mx-auto mb-3 h-28 w-28 object-contain drop-shadow-[0_8px_24px_rgba(150,90,190,0.35)]" />
         <p className="eyebrow text-gold">2-month transformation</p>
         <h1 className="font-display text-6xl uppercase leading-none tracking-wide">
           Fit<span className="text-gold">Arena</span>
