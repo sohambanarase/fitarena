@@ -1,14 +1,15 @@
 // ============================================================
 // /api/coach.js — Vercel Serverless Function (Node runtime)
-// Keeps GEMINI_API_KEY server-side. The browser sends only a stats payload.
+// Keeps AI provider keys server-side. The browser sends only a stats payload.
 // ============================================================
 
-import { generate } from "./_gemini.js";
+import { generate, anyConfigured } from "./_ai.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  // Any one provider is enough — the chain in _ai.js decides which to actually use.
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return res.status(500).json({ error: "GEMINI_API_KEY not configured on the server." });
+  if (!anyConfigured()) return res.status(500).json({ error: "No AI provider configured on the server." });
 
   const b = typeof req.body === "string" ? safeParse(req.body) : req.body || {};
   const weeklyGoal = b.weeklyGoal ?? 4;
@@ -58,7 +59,7 @@ export default async function handler(req, res) {
     }
     if (!r.ok) {
       const detail = await r.text().catch(() => "");
-      return res.status(502).json({ error: "Gemini error", model: r.modelUsed || "unknown", status: r.status, detail: detail.slice(0, 300) });
+      return res.status(502).json({ error: "AI error", provider: r.providerUsed || "unknown", model: r.modelUsed || "unknown", status: r.status, detail: detail.slice(0, 300) });
     }
 
     const data = await r.json();

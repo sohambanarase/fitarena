@@ -722,3 +722,67 @@ password twice and save. Minimum 8 characters, and the button stays disabled unt
 
 Handy combination: if you ever forget your password entirely, sign in with an email code and then set
 a new password here.
+
+---
+
+## v20 — AI fallback chain (Gemini → Groq → OpenRouter)
+
+**No migration. No frontend change.** Everything happens server-side in `/api`.
+
+### The problem
+Gemini's free quota is **per-project, not per-model**. The old `_gemini.js` tried four
+Gemini models in turn, but when the key gets a 429 all four are rate-limited at the same
+instant, so hopping between them changed nothing. The only real fix is a second provider
+on a separate key.
+
+### The fix
+`api/_ai.js` tries providers in order until one answers:
+
+| Request | Chain |
+| --- | --- |
+| Text (coach, assist, burn, meal text) | Gemini → Groq → OpenRouter |
+| Images (label scan, meal photo) | Gemini → OpenRouter |
+
+**Groq is skipped for images on purpose.** It retired both of its vision models — Llama 4
+Maverick in March 2026, Llama 4 Scout in July 2026 — and the replacements are text-only.
+If Groq ships a new multimodal model, set `GROQ_VISION_MODEL` and it rejoins the image
+chain automatically; nothing else needs editing.
+
+**OpenRouter sits last on purpose.** Its free tier is 50 requests/day (1,000 after a
+one-time $10 credit purchase) at 20/min — too thin to lead with, ideal as a backstop. It
+uses `openrouter/free`, a router that picks a free model and filters for the capabilities
+the request needs, image understanding included.
+
+### Setup — two env vars in Vercel, both free, no card
+```
+GROQ_API_KEY        → console.groq.com/keys
+OPENROUTER_API_KEY  → openrouter.ai/keys
+```
+Add them under **Settings → Environment Variables**, then redeploy so the functions pick
+them up. Add one or both — with neither set, behaviour is exactly as before, Gemini only.
+
+Optional overrides: `GEMINI_MODEL`, `GROQ_MODEL`, `GROQ_VISION_MODEL`, `OPENROUTER_MODEL`.
+
+### Check it's live
+Open `/api/ai-status` in a browser. It returns which providers have a key, the resolved
+chain, and anything currently in the penalty box. It never returns key values.
+
+```json
+{ "ok": true,
+  "configured": { "gemini": true, "groq": true, "openrouter": true },
+  "chain": { "text": ["gemini","groq","openrouter"], "images": ["gemini","openrouter"] },
+  "benched": [] }
+```
+`benched` may read empty on a cold start even when another instance is throttled — the
+penalty box is per warm serverless instance. That's expected.
+
+### Other behaviour
+- **A failing provider is remembered.** 429/5xx benches it for 5 minutes; 401/403 (bad or
+  missing key) benches it for 6 hours, so a dead key isn't retried on every request.
+- **Failure reads as "busy", not "broken".** If every provider is down, a 429 is preferred
+  over a 500 so the app still shows "AI is busy, try again shortly".
+- **20-second timeout per provider** so one hung call can't eat the serverless budget.
+- **JSON parsing hardened.** Fallback models sometimes wrap JSON in prose or a code fence
+  despite the prompt. `safeParse` now extracts the first balanced `{...}` block, correctly
+  handling nested objects and braces inside strings.
+- **Coach errors now report which provider failed**, not just "Gemini error".

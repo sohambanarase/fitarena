@@ -1,12 +1,13 @@
-// /api/nutrition.js — Gemini-backed nutrition helper.
+// /api/nutrition.js — AI-backed nutrition helper.
 // modes: "estimate" (meal text -> macros), "label" (label photo -> per-100g macros),
 //        "assist" (question + today's context -> short answer).
-import { generate } from "./_gemini.js";
+import { generate, anyConfigured } from "./_ai.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  // Any one provider is enough — the chain in _ai.js decides which to actually use.
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return res.status(500).json({ error: "GEMINI_API_KEY not configured." });
+  if (!anyConfigured()) return res.status(500).json({ error: "No AI provider configured." });
   const b = typeof req.body === "string" ? safeParse(req.body) : req.body || {};
   const mode = b.mode || "estimate";
   try {
@@ -19,7 +20,7 @@ export default async function handler(req, res) {
   }
 }
 
-async function gemini(key, parts, maxTokens, temp) {
+async function ai(key, parts, maxTokens, temp) {
   return generate(key, { parts, maxOutputTokens: maxTokens, temperature: temp == null ? 0.3 : temp });
 }
 
@@ -36,8 +37,8 @@ async function estimate(b, key, res) {
   ].filter(Boolean).join("\n");
   const parts = [{ text: prompt }];
   if (image) parts.push({ inlineData: { mimeType: b.mimeType || "image/jpeg", data: image } });
-  const r = await gemini(key, parts, 120);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const r = await ai(key, parts, 120);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
   const data = await r.json();
   const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
   const p = safeParse(t);
@@ -54,8 +55,8 @@ async function labelScan(b, key, res) {
     "Return ONLY compact JSON, no markdown: {\"name\":<string or null>,\"calories_per_100g\":<num>,\"protein_per_100g\":<num>,\"carbs_per_100g\":<num>,\"fat_per_100g\":<num>,\"sugar_per_100g\":<num or null>,\"salt_per_100g\":<num or null>,\"fiber_per_100g\":<num or null>,\"serving_size\":<num grams or null>}.",
     "If a value isn't legible, use null. Never invent values.",
   ].join("\n");
-  const r = await gemini(key, [{ text: prompt }, { inlineData: { mimeType, data: image } }], 300);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const r = await ai(key, [{ text: prompt }, { inlineData: { mimeType, data: image } }], 300);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
   const data = await r.json();
   const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
   const p = safeParse(t);
@@ -81,8 +82,8 @@ async function assist(b, key, res) {
     "If hydration is clearly behind and relevant to what they asked, mention it in one short clause - do not lecture.",
     "", "THEIR DAY: " + ctx, "", "QUESTION: " + q,
   ].join("\n");
-  const r = await gemini(key, [{ text: prompt }], 260, 0.5);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const r = await ai(key, [{ text: prompt }], 260, 0.5);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
   const data = await r.json();
   const text = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").trim();
   if (!text) return res.status(200).json({ ok: false, error: "No answer - try rephrasing." });
@@ -104,8 +105,8 @@ async function burn(b, key, res) {
     "Return ONLY compact JSON: {\"calories\":<int>,\"label\":<short 2-4 word name>,\"minutes\":<int or null>}. No markdown, no words.",
     "", "ACTIVITY: " + desc,
   ].join("\n");
-  const r = await gemini(key, [{ text: prompt }], 120);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy (free-tier limit). Try again shortly." });
+  const r = await ai(key, [{ text: prompt }], 120);
+  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
   const data = await r.json();
   const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
   const p = safeParse(t);
@@ -115,4 +116,20 @@ async function burn(b, key, res) {
 
 function int(v) { return Math.max(0, Math.round(Number(v) || 0)); }
 function r0(v) { return Math.round(Number(v) || 0); }
-function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+function safeParse(s) {
+  if (s == null) return null;
+  try { return JSON.parse(s); } catch { /* fall through */ }
+  // Smaller fallback models sometimes wrap the JSON in prose or a fence despite the
+  // prompt. Pull out the first balanced {...} block and try that before giving up.
+  const t = String(s).replace(/```[a-z]*|```/gi, "");
+  const start = t.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < t.length; i++) {
+    if (t[i] === "{") depth++;
+    else if (t[i] === "}" && --depth === 0) {
+      try { return JSON.parse(t.slice(start, i + 1)); } catch { return null; }
+    }
+  }
+  return null;
+}
