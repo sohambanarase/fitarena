@@ -786,3 +786,39 @@ penalty box is per warm serverless instance. That's expected.
   despite the prompt. `safeParse` now extracts the first balanced `{...}` block, correctly
   handling nested objects and braces inside strings.
 - **Coach errors now report which provider failed**, not just "Gemini error".
+
+---
+
+## v21 — duplicate a saved meal, scan a barcode while editing one
+
+**No migration.** Frontend only.
+
+### Duplicate a saved meal
+Saved meals now have a **copy icon** next to edit and delete. Tapping it clones the meal and
+its items, then drops you **straight into the editor** — duplicating is only ever a step
+towards changing something, so making you hunt for the copy afterwards would waste a tap.
+
+Names never collide: `Chicken bowl` → `Chicken bowl (copy)` → `(copy 2)` → `(copy 3)`.
+Copying a copy strips the old suffix rather than stacking it, so you never end up with
+`Chicken bowl (copy) (copy)`. Matching is case-insensitive. The button is disabled while a
+copy is in flight, so an impatient double-tap can't create two.
+
+Built on the existing `createSavedMeal` rather than its own insert, so the saved row shape
+can't drift from a normally-created meal.
+
+### Barcode scanning inside the saved-meal picker
+The **+ Add food** picker now has **Search / Scan** tabs. Scan reuses `BarcodeView` — the
+same scanner as the main Add-food flow — so there's one scanner in the app, not two to keep
+in sync. Camera scan and manual barcode entry both work, with the same Open Food Facts
+lookup.
+
+This landed in `FoodPickerInline`, which both `CreateSavedMeal` and `EditSavedMeal` render,
+so **building a new saved meal and editing an existing one both got it** from one change.
+A scanned product arrives without a database id; both callers already handled that
+(`addFood` / `ensureFood`), so no extra plumbing was needed.
+
+### Exercise info in Grind — already shipped
+This was asked for but already exists (added in v14). Every exercise row in Grind, in both
+the category list and the search results, has a small **ⓘ** button on the right. It opens a
+sheet with photos, muscle/category/equipment/level tags, how-to steps, and a **Log this
+now** button. Nothing was changed here.

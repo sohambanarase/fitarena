@@ -249,6 +249,25 @@ export async function createSavedMeal(userId, name, items) {
   return meal;
 }
 export async function deleteSavedMeal(id) { return supabase.from("saved_meals").delete().eq("id", id); }
+
+// Copies a saved meal and its items under a new name. Built on createSavedMeal rather than
+// its own insert, so the row shape can never drift from the original.
+// Names avoid collisions: "Chicken bowl" -> "Chicken bowl (copy)" -> "(copy 2)" -> "(copy 3)".
+export function copyName(baseName, existingNames) {
+  const base = String(baseName || "Saved meal").replace(/\s*\(copy(?: \d+)?\)$/i, "").trim();
+  const taken = new Set((existingNames || []).map((n) => String(n).toLowerCase()));
+  let candidate = base + " (copy)";
+  let n = 2;
+  while (taken.has(candidate.toLowerCase())) candidate = base + " (copy " + n++ + ")";
+  return candidate;
+}
+export async function duplicateSavedMeal(userId, meal, existingNames) {
+  const items = (meal.items || []).map((it) => ({
+    food_id: it.food_id,
+    grams: Number(it.quantity_grams || it.quantity) || 100,
+  })).filter((it) => it.food_id);
+  return createSavedMeal(userId, copyName(meal.meal_name, existingNames), items);
+}
 export async function logSavedMeal(userId, date, mealType, savedMeal) {
   const rows = (savedMeal.items || []).filter((it) => it.food).map((it) => {
     const m = macrosFor(it.food, it.quantity_grams || 100);

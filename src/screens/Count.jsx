@@ -19,10 +19,10 @@ import {
   loadQuickFoods, builtinQuickFoods, addQuickFood, updateFoodRow, deleteFoodRow, hideDefaultQuick, restoreDefaultQuick, hiddenDefaultCount,
   getFood, updateLog, loadMyFoods,
   loadBurn, addBurn, removeBurn, burnTotal, workoutSummary,
-  updateSavedMeal, addSavedMealItem, updateSavedMealItem, deleteSavedMealItem,
+  updateSavedMeal, addSavedMealItem, updateSavedMealItem, deleteSavedMealItem, duplicateSavedMeal,
   loadBurnRange, dailySeries, projectedWeeklyChangeKg,
 } from "../lib/nutrition.js";
-import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell, Scale, Droplet, Bell, GlassWater } from "lucide-react";
+import { Settings, Plus, Search, Sparkles, Zap, Trash2, ScanLine, PencilLine, Apple, Barcode, Camera, Bookmark, BookmarkPlus, X, ChevronLeft, ChevronRight, Star, Image as ImageIcon, MessageCircle, TrendingUp, Pencil, Copy, RotateCcw, CalendarDays, ListChecks, Flame, Dumbbell, Scale, Droplet, Bell, GlassWater } from "lucide-react";
 
 const num = (v) => (v === "" || v == null ? null : Number(v));
 const GOAL_BAND = 0.10;   // ±10% counts as hitting the goal
@@ -861,7 +861,21 @@ function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
 function SavedMealsView({ userId, date, meal, setMeal, onLogged }) {
   const [meals, setMeals] = useState(null);
   const [mode, setMode] = useState("list");
+  const [copying, setCopying] = useState(null);   // id being duplicated — blocks double-taps
   const reload = () => loadSavedMeals(userId).then(setMeals);
+
+  // Copy, then drop straight into the editor. Duplicating is only ever a step towards
+  // changing something, so making them hunt for the copy afterwards would be a wasted tap.
+  async function duplicate(m) {
+    if (copying) return;
+    setCopying(m.id);
+    const created = await duplicateSavedMeal(userId, m, (meals || []).map((x) => x.meal_name));
+    const fresh = await loadSavedMeals(userId);
+    setMeals(fresh);
+    setCopying(null);
+    const target = created && fresh.find((x) => x.id === created.id);
+    if (target) setMode({ edit: target });
+  }
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
 
   if (mode === "create") return <CreateSavedMeal userId={userId} onDone={() => { setMode("list"); reload(); }} onCancel={() => setMode("list")} />;
@@ -886,6 +900,8 @@ function SavedMealsView({ userId, date, meal, setMeal, onLogged }) {
                     <p className="text-[11px] text-muted">{m.items.length} item{m.items.length !== 1 ? "s" : ""} · {Math.round(t.cal)} kcal · {Math.round(t.p)}g P</p>
                   </div>
                   <button onClick={async () => { await logSavedMeal(userId, date, meal, m); onLogged(); }} className="btn-primary px-3 py-2 text-sm">Log</button>
+                  <button onClick={() => duplicate(m)} disabled={!!copying} aria-label={"Duplicate " + m.meal_name} title="Duplicate"
+                    className={"active:scale-90 " + (copying === m.id ? "text-paper" : "text-muted")}><Copy size={15} /></button>
                   <button onClick={() => setMode({ edit: m })} aria-label="Edit meal" className="text-muted active:scale-90"><Pencil size={15} /></button>
                   <button onClick={async () => { await deleteSavedMeal(m.id); reload(); }} aria-label="Delete meal" className="text-muted active:scale-90 hover:text-ember"><Trash2 size={16} /></button>
                 </div>
@@ -945,7 +961,13 @@ function CreateSavedMeal({ userId, onDone, onCancel }) {
   );
 }
 
+// Used by both CreateSavedMeal and EditSavedMeal, so the Scan tab added here covers
+// building a saved meal and editing one. Barcode reuses BarcodeView — the same scanner the
+// main Add-food flow uses — so there is one scanner in the app, not two to keep in sync.
+// A scanned product arrives without an id; the callers already handle that (addFood /
+// ensureFood), which is why the food object can be handed straight to onPick.
 function FoodPickerInline({ userId, onPick }) {
+  const [tab, setTab] = useState("search");   // search | barcode
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -954,11 +976,19 @@ function FoodPickerInline({ userId, onPick }) {
   const list = q.trim() ? results : recent;
   return (
     <div className="space-y-2">
-      <div className="search-glass"><Search size={18} className="text-muted" /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
-      <div className="max-h-[42vh] space-y-1.5 overflow-y-auto">
-        {list.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
-        {!q.trim() && <><p className="eyebrow pt-1">Gym staples</p>{QUICK_FOODS.map((f, i) => <FoodRow key={"q" + i} food={f} onClick={() => onPick({ ...f, source: "quickadd" })} />)}</>}
+      <div className="flex gap-1.5">
+        <button onClick={() => setTab("search")} className={"pill flex flex-1 items-center justify-center gap-1 py-2 " + (tab === "search" ? "pill-on" : "")}><Search size={14} /> Search</button>
+        <button onClick={() => setTab("barcode")} className={"pill flex flex-1 items-center justify-center gap-1 py-2 " + (tab === "barcode" ? "pill-on" : "")}><ScanLine size={14} /> Scan</button>
       </div>
+      {tab === "barcode" ? <BarcodeView onPick={onPick} /> : (
+        <>
+          <div className="search-glass"><Search size={18} className="text-muted" /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
+          <div className="max-h-[42vh] space-y-1.5 overflow-y-auto">
+            {list.map((f) => <FoodRow key={f.id} food={f} onClick={() => onPick(f)} />)}
+            {!q.trim() && <><p className="eyebrow pt-1">Gym staples</p>{QUICK_FOODS.map((f, i) => <FoodRow key={"q" + i} food={f} onClick={() => onPick({ ...f, source: "quickadd" })} />)}</>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
