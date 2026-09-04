@@ -822,3 +822,39 @@ This was asked for but already exists (added in v14). Every exercise row in Grin
 the category list and the search results, has a small **ⓘ** button on the right. It opens a
 sheet with photos, muscle/category/equipment/level tags, how-to steps, and a **Log this
 now** button. Nothing was changed here.
+
+---
+
+## v22 — fixing "Couldn't estimate that. Add quantities."
+
+**No migration. No frontend change.** All in `/api`.
+
+The AI meal estimate failed often, including on well-described meals with no photo, and the
+error blamed your description. Your description was rarely the problem. Three bugs:
+
+**1. Only the first response part was read.** This was the main cause.
+Gemini's thinking-capable models return a **thought part first**, with no `.text` on it, and
+the real answer in the part after it. `nutrition.js` read `parts[0].text` — so it threw away
+the answer and parsed an empty string. `coach.js` already joined every part, which is
+exactly why Coach kept working while meal estimates didn't.
+Now `extractText()` joins all text parts and skips thought parts.
+
+**2. The token budget was too small.** Estimate and burn allowed 120 output tokens. Any
+preamble or leftover thinking truncated the JSON mid-object, which parses to nothing.
+Now 320 for estimate and burn, 500 for label scan, 420 for the assist answer.
+
+**3. `finishReason` was never checked.** A truncated or safety-blocked reply was
+indistinguishable from a bad meal description, so you were told to add quantities when
+quantities were never the issue.
+
+### What changed
+- **One retry on failure.** If the reply is truncated or unparseable, it asks again with
+  double the tokens and a blunter "raw JSON only, no thinking out loud" instruction.
+  Weaker fallback models usually comply on the second ask. Success never retries.
+- **Honest error messages.** Truncated says it got cut off. Blocked says it was blocked.
+  Provider unreachable says so. Only a genuine failure to understand suggests rewording,
+  and it now asks for a dish name and rough portion rather than just "add quantities".
+- **`<think>` blocks stripped** from OpenAI-compatible replies, so a reasoning model on the
+  Groq or OpenRouter fallback can't reintroduce the same class of bug.
+
+Coach was never affected and is unchanged.

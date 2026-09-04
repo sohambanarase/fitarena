@@ -96,7 +96,11 @@ export async function callOpenAICompat({ url, key, model, parts, temperature, ma
   let j;
   try { j = await r.json(); } catch { return asFailure(502, "Bad JSON from provider"); }
 
-  const text = (j?.choices?.[0]?.message?.content || "").trim();
+  const msg = j?.choices?.[0]?.message || {};
+  // Some reasoning models put their scratchpad in a separate field, but a few inline it
+  // as <think>…</think> inside content. Strip it so JSON parsing downstream sees the
+  // answer and not the thinking — the same class of bug that broke nutrition.js.
+  const text = String(msg.content || "").replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   if (!text) return asFailure(502, "Empty completion");
   return asGeminiResponse(text);
 }

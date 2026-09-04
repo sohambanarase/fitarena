@@ -24,6 +24,71 @@ async function ai(key, parts, maxTokens, temp) {
   return generate(key, { parts, maxOutputTokens: maxTokens, temperature: temp == null ? 0.3 : temp });
 }
 
+
+/* ---------- response reading ----------
+   Three bugs lived here and together they caused the frequent, confusing
+   "Couldn't estimate that. Add quantities." even on well-described meals:
+
+   1. Only parts[0] was read. Gemini's thinking-capable models return a THOUGHT part
+      first, whose .text is undefined — so the real answer sitting in parts[1] was
+      thrown away and the parse failed. coach.js already joined all parts; this file
+      didn't. That single line is the main cause.
+   2. maxOutputTokens was 120 for estimate and burn. Any preamble or leftover thinking
+      truncated the JSON mid-object, which parses to nothing.
+   3. finishReason was never checked, so a truncated or safety-blocked reply was
+      reported as a bad meal description — telling you to add quantities when
+      quantities were never the problem.
+*/
+
+// Joins every text part and drops thought parts, which carry no .text.
+function extractText(data) {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts.filter((p) => p && typeof p.text === "string" && !p.thought)
+              .map((p) => p.text).join("").replace(/```json|```/gi, "").trim();
+}
+
+function finishReason(data) { return data?.candidates?.[0]?.finishReason || null; }
+function blockReason(data) { return data?.promptFeedback?.blockReason || null; }
+
+// Asks for JSON, and retries once if the model truncated or answered with something
+// unparseable. The retry doubles the token budget and adds a blunter instruction —
+// weaker fallback models often comply on the second, more explicit ask.
+async function askJSON(key, parts, maxTokens, validate, temp) {
+  let lastReason = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const tokens = attempt === 0 ? maxTokens : maxTokens * 2;
+    const sendParts = attempt === 0 ? parts : parts.map((pt, i) =>
+      i === 0 && pt.text
+        ? { text: pt.text + "\n\nIMPORTANT: reply with the raw JSON object only. No explanation, no markdown fences, no thinking out loud." }
+        : pt);
+
+    const r = await ai(key, sendParts, tokens, temp);
+    if (r.status === 429) return { busy: true };
+    if (!r.ok) { lastReason = "provider"; continue; }
+
+    const data = await r.json();
+    if (blockReason(data)) return { blocked: true };
+
+    const parsed = safeParse(extractText(data));
+    if (parsed && validate(parsed)) return { ok: true, data: parsed };
+
+    lastReason = finishReason(data) === "MAX_TOKENS" ? "truncated" : "unparseable";
+    if (lastReason !== "truncated" && attempt === 0 && !extractText(data)) lastReason = "empty";
+  }
+  return { failed: lastReason || "unparseable" };
+}
+
+// One place deciding what the user is told, so the message matches the real cause
+// instead of always blaming the description.
+function failMessage(reason, fallback) {
+  if (reason === "truncated") return "That answer got cut off. Try again, or split a very long meal into two entries.";
+  if (reason === "provider") return "AI is unreachable right now. Try again in a moment.";
+  if (reason === "empty") return "The AI returned nothing. Try again.";
+  return fallback;
+}
+
 async function estimate(b, key, res) {
   const meal = (b.meal || "").toString().slice(0, 500).trim();
   const image = (b.image || "").toString();
@@ -37,12 +102,11 @@ async function estimate(b, key, res) {
   ].filter(Boolean).join("\n");
   const parts = [{ text: prompt }];
   if (image) parts.push({ inlineData: { mimeType: b.mimeType || "image/jpeg", data: image } });
-  const r = await ai(key, parts, 120);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
-  const data = await r.json();
-  const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
-  const p = safeParse(t);
-  if (!p || p.calories == null) return res.status(200).json({ ok: false, error: "Couldn't estimate that. Add quantities." });
+  const out = await askJSON(key, parts, 320, (p) => p.calories != null);
+  if (out.busy) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
+  if (out.blocked) return res.status(200).json({ ok: false, error: "That description was blocked. Try rewording it." });
+  if (!out.ok) return res.status(200).json({ ok: false, error: failMessage(out.failed, "Couldn't estimate that one. Try naming the dish and a rough portion.") });
+  const p = out.data;
   return res.status(200).json({ ok: true, calories: int(p.calories), protein: int(p.protein), carbs: int(p.carbs), fat: int(p.fat) });
 }
 
@@ -55,13 +119,11 @@ async function labelScan(b, key, res) {
     "Return ONLY compact JSON, no markdown: {\"name\":<string or null>,\"calories_per_100g\":<num>,\"protein_per_100g\":<num>,\"carbs_per_100g\":<num>,\"fat_per_100g\":<num>,\"sugar_per_100g\":<num or null>,\"salt_per_100g\":<num or null>,\"fiber_per_100g\":<num or null>,\"serving_size\":<num grams or null>}.",
     "If a value isn't legible, use null. Never invent values.",
   ].join("\n");
-  const r = await ai(key, [{ text: prompt }, { inlineData: { mimeType, data: image } }], 300);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
-  const data = await r.json();
-  const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
-  const p = safeParse(t);
-  if (!p || p.calories_per_100g == null) return res.status(200).json({ ok: false, error: "Couldn't read that label. Try a clearer, straight-on photo." });
-  return res.status(200).json({ ok: true, food: p });
+  const out = await askJSON(key, [{ text: prompt }, { inlineData: { mimeType, data: image } }], 500, (p) => p.calories_per_100g != null);
+  if (out.busy) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
+  if (out.blocked) return res.status(200).json({ ok: false, error: "That image was blocked. Try another photo." });
+  if (!out.ok) return res.status(200).json({ ok: false, error: failMessage(out.failed, "Couldn't read that label. Try a clearer, straight-on photo.") });
+  return res.status(200).json({ ok: true, food: out.data });
 }
 
 async function assist(b, key, res) {
@@ -82,10 +144,10 @@ async function assist(b, key, res) {
     "If hydration is clearly behind and relevant to what they asked, mention it in one short clause - do not lecture.",
     "", "THEIR DAY: " + ctx, "", "QUESTION: " + q,
   ].join("\n");
-  const r = await ai(key, [{ text: prompt }], 260, 0.5);
+  const r = await ai(key, [{ text: prompt }], 420, 0.5);
   if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
   const data = await r.json();
-  const text = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").trim();
+  const text = extractText(data);
   if (!text) return res.status(200).json({ ok: false, error: "No answer - try rephrasing." });
   return res.status(200).json({ ok: true, answer: text });
 }
@@ -105,12 +167,11 @@ async function burn(b, key, res) {
     "Return ONLY compact JSON: {\"calories\":<int>,\"label\":<short 2-4 word name>,\"minutes\":<int or null>}. No markdown, no words.",
     "", "ACTIVITY: " + desc,
   ].join("\n");
-  const r = await ai(key, [{ text: prompt }], 120);
-  if (r.status === 429) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
-  const data = await r.json();
-  const t = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text || "").replace(/```json|```/g, "").trim();
-  const p = safeParse(t);
-  if (!p || p.calories == null) return res.status(200).json({ ok: false, error: "Couldn't estimate that. Try describing it differently." });
+  const out = await askJSON(key, [{ text: prompt }], 320, (p) => p.calories != null);
+  if (out.busy) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
+  if (out.blocked) return res.status(200).json({ ok: false, error: "That description was blocked. Try rewording it." });
+  if (!out.ok) return res.status(200).json({ ok: false, error: failMessage(out.failed, "Couldn't estimate that. Try describing it differently.") });
+  const p = out.data;
   return res.status(200).json({ ok: true, calories: int(p.calories), label: (p.label || "Activity").toString().slice(0, 40), minutes: p.minutes == null ? null : int(p.minutes) });
 }
 
