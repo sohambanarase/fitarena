@@ -28,12 +28,12 @@ const num = (v) => (v === "" || v == null ? null : Number(v));
 const GOAL_BAND = 0.10;   // ±10% counts as hitting the goal
 
 /* progress ring */
-function Ring({ value, goal, size = 128, stroke = 11, color = "rgb(var(--c-gold))", children }) {
+function Ring({ value, goal, size = 128, stroke = 11, color = "rgb(var(--c-gold))", label, children }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r;
   const pct = goal > 0 ? Math.min(1, value / goal) : 0;
   return (
-    <div className="relative grid place-items-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+    <div className="relative grid place-items-center" style={{ width: size, height: size }} role="img" aria-label={label}>
+      <svg width={size} height={size} aria-hidden="true" style={{ transform: "rotate(-90deg)" }}>
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: "rgb(var(--c-surface2))" }} strokeWidth={stroke} />
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: color, strokeDashoffset: c * (1 - pct), transition: "stroke-dashoffset .6s ease" }} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} />
       </svg>
@@ -94,6 +94,9 @@ export default function Count() {
   const burned = burnTotal(burn);
   const calGoal = goals?.calories_goal || 0;
   const remaining = calGoal ? Math.round(calGoal + burned - t.calories) : null;
+  const overBudget = remaining != null && remaining < 0;
+  const ringCount = remaining != null ? Math.abs(remaining) : Math.round(t.calories);
+  const ringLabel = remaining == null ? "kcal eaten" : overBudget ? "kcal over" : "kcal left";
   const byMeal = useMemo(() => {
     const m = {}; MEALS.forEach((k) => (m[k] = []));
     logs.forEach((l) => (m[l.meal_type] || (m[l.meal_type] = [])).push(l));
@@ -137,10 +140,11 @@ export default function Count() {
               </button>
             ) : (
               <div className="flex items-center gap-4">
-                <Ring value={t.calories} goal={calGoal + burned}>
-                  <p className="font-score text-2xl font-bold">{remaining != null ? remaining : Math.round(t.calories)}</p>
-                  <p className="text-[10px] text-muted">{remaining != null ? "kcal left" : "kcal"}</p>
-                  {burned > 0 && <p className="mt-0.5 text-[9px] font-bold text-mint">+{Math.round(burned)} burned</p>}
+                <Ring value={t.calories} goal={calGoal + burned}
+                  color={overBudget ? "rgb(var(--c-ember))" : "rgb(var(--c-gold))"}
+                  label={ringCount.toLocaleString() + " " + ringLabel}>
+                  <p className={"font-score text-2xl font-bold" + (overBudget ? " text-ember" : "")}>{ringCount.toLocaleString()}</p>
+                  <p className={"text-[10px] " + (overBudget ? "text-ember" : "text-muted")}>{ringLabel}</p>
                 </Ring>
                 <div className="min-w-0 flex-1 space-y-2.5">
                   <div>
@@ -154,6 +158,16 @@ export default function Count() {
                   <MacroBar label="Carbs" value={t.carbs} goal={goals?.carbs_goal} color="var(--grad-gold)" />
                   <MacroBar label="Fat" value={t.fat} goal={goals?.fat_goal} color="var(--grad-ember)" />
                 </div>
+              </div>
+            )}
+
+            {calGoal > 0 && (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[11px] font-semibold leading-none">
+                <span className="text-muted">{calGoal.toLocaleString()} goal</span>
+                {burned > 0 && <span className="text-mint">+ {Math.round(burned).toLocaleString()} exercise</span>}
+                <span className="text-muted">&minus; {Math.round(t.calories).toLocaleString()} eaten</span>
+                <span className="text-muted">=</span>
+                <span className={overBudget ? "text-ember" : "text-gold"}>{ringCount.toLocaleString()} {overBudget ? "over" : "left"}</span>
               </div>
             )}
 
@@ -190,7 +204,7 @@ export default function Count() {
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface2"><Flame size={18} className="text-mint" /></div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold">{burned > 0 ? Math.round(burned) + " kcal burned" : "No activity logged"}</p>
-                <p className="text-[11px] text-muted">{burned > 0 ? "Added back to today's budget" : "Log a workout or activity to earn calories back"}</p>
+                <p className="text-[11px] text-muted">{burned > 0 ? "Already added to your calorie budget above" : "Log a workout or activity to earn calories back"}</p>
               </div>
               <button onClick={() => setShowBurn(true)} className="pill flex items-center gap-1"><Plus size={13} /> Add</button>
             </div>
