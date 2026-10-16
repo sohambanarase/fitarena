@@ -1,0 +1,770 @@
+# Changelog
+
+Newest first. Each entry says what changed and whether a Supabase migration is needed.
+
+---
+
+## v22 — fixing "Couldn't estimate that. Add quantities."
+
+**No migration. No frontend change.** All in `/api`.
+
+The AI meal estimate failed often, including on well-described meals with no photo, and the
+error blamed your description. Your description was rarely the problem. Three bugs:
+
+**1. Only the first response part was read.** This was the main cause.
+Gemini's thinking-capable models return a **thought part first**, with no `.text` on it, and
+the real answer in the part after it. `nutrition.js` read `parts[0].text` — so it threw away
+the answer and parsed an empty string. `coach.js` already joined every part, which is
+exactly why Coach kept working while meal estimates didn't.
+Now `extractText()` joins all text parts and skips thought parts.
+
+**2. The token budget was too small.** Estimate and burn allowed 120 output tokens. Any
+preamble or leftover thinking truncated the JSON mid-object, which parses to nothing.
+Now 320 for estimate and burn, 500 for label scan, 420 for the assist answer.
+
+**3. `finishReason` was never checked.** A truncated or safety-blocked reply was
+indistinguishable from a bad meal description, so you were told to add quantities when
+quantities were never the issue.
+
+### What changed
+- **One retry on failure.** If the reply is truncated or unparseable, it asks again with
+  double the tokens and a blunter "raw JSON only, no thinking out loud" instruction.
+  Weaker fallback models usually comply on the second ask. Success never retries.
+- **Honest error messages.** Truncated says it got cut off. Blocked says it was blocked.
+  Provider unreachable says so. Only a genuine failure to understand suggests rewording,
+  and it now asks for a dish name and rough portion rather than just "add quantities".
+- **`<think>` blocks stripped** from OpenAI-compatible replies, so a reasoning model on the
+  Groq or OpenRouter fallback can't reintroduce the same class of bug.
+
+Coach was never affected and is unchanged.
+
+---
+
+## v21 — duplicate a saved meal, scan a barcode while editing one
+
+**No migration.** Frontend only.
+
+### Duplicate a saved meal
+Saved meals now have a **copy icon** next to edit and delete. Tapping it clones the meal and
+its items, then drops you **straight into the editor** — duplicating is only ever a step
+towards changing something, so making you hunt for the copy afterwards would waste a tap.
+
+Names never collide: `Chicken bowl` → `Chicken bowl (copy)` → `(copy 2)` → `(copy 3)`.
+Copying a copy strips the old suffix rather than stacking it, so you never end up with
+`Chicken bowl (copy) (copy)`. Matching is case-insensitive. The button is disabled while a
+copy is in flight, so an impatient double-tap can't create two.
+
+Built on the existing `createSavedMeal` rather than its own insert, so the saved row shape
+can't drift from a normally-created meal.
+
+### Barcode scanning inside the saved-meal picker
+The **+ Add food** picker now has **Search / Scan** tabs. Scan reuses `BarcodeView` — the
+same scanner as the main Add-food flow — so there's one scanner in the app, not two to keep
+in sync. Camera scan and manual barcode entry both work, with the same Open Food Facts
+lookup.
+
+This landed in `FoodPickerInline`, which both `CreateSavedMeal` and `EditSavedMeal` render,
+so **building a new saved meal and editing an existing one both got it** from one change.
+A scanned product arrives without a database id; both callers already handled that
+(`addFood` / `ensureFood`), so no extra plumbing was needed.
+
+### Exercise info in Grind — already shipped
+This was asked for but already exists (added in v14). Every exercise row in Grind, in both
+the category list and the search results, has a small **ⓘ** button on the right. It opens a
+sheet with photos, muscle/category/equipment/level tags, how-to steps, and a **Log this
+now** button. Nothing was changed here.
+
+---
+
+---
+
+## v20 — AI fallback chain (Gemini → Groq → OpenRouter)
+
+**No migration. No frontend change.** Everything happens server-side in `/api`.
+
+### The problem
+Gemini's free quota is **per-project, not per-model**. The old `_gemini.js` tried four
+Gemini models in turn, but when the key gets a 429 all four are rate-limited at the same
+instant, so hopping between them changed nothing. The only real fix is a second provider
+on a separate key.
+
+### The fix
+`api/_ai.js` tries providers in order until one answers:
+
+| Request | Chain |
+| --- | --- |
+| Text (coach, assist, burn, meal text) | Gemini → Groq → OpenRouter |
+| Images (label scan, meal photo) | Gemini → OpenRouter |
+
+**Groq is skipped for images on purpose.** It retired both of its vision models — Llama 4
+Maverick in March 2026, Llama 4 Scout in July 2026 — and the replacements are text-only.
+If Groq ships a new multimodal model, set `GROQ_VISION_MODEL` and it rejoins the image
+chain automatically; nothing else needs editing.
+
+**OpenRouter sits last on purpose.** Its free tier is 50 requests/day (1,000 after a
+one-time $10 credit purchase) at 20/min — too thin to lead with, ideal as a backstop. It
+uses `openrouter/free`, a router that picks a free model and filters for the capabilities
+the request needs, image understanding included.
+
+### Setup — two env vars in Vercel, both free, no card
+```
+GROQ_API_KEY        → console.groq.com/keys
+OPENROUTER_API_KEY  → openrouter.ai/keys
+```
+Add them under **Settings → Environment Variables**, then redeploy so the functions pick
+them up. Add one or both — with neither set, behaviour is exactly as before, Gemini only.
+
+Optional overrides: `GEMINI_MODEL`, `GROQ_MODEL`, `GROQ_VISION_MODEL`, `OPENROUTER_MODEL`.
+
+### Check it's live
+Open `/api/ai-status` in a browser. It returns which providers have a key, the resolved
+chain, and anything currently in the penalty box. It never returns key values.
+
+```json
+{ "ok": true,
+  "configured": { "gemini": true, "groq": true, "openrouter": true },
+  "chain": { "text": ["gemini","groq","openrouter"], "images": ["gemini","openrouter"] },
+  "benched": [] }
+```
+`benched` may read empty on a cold start even when another instance is throttled — the
+penalty box is per warm serverless instance. That's expected.
+
+### Other behaviour
+- **A failing provider is remembered.** 429/5xx benches it for 5 minutes; 401/403 (bad or
+  missing key) benches it for 6 hours, so a dead key isn't retried on every request.
+- **Failure reads as "busy", not "broken".** If every provider is down, a 429 is preferred
+  over a 500 so the app still shows "AI is busy, try again shortly".
+- **20-second timeout per provider** so one hung call can't eat the serverless budget.
+- **JSON parsing hardened.** Fallback models sometimes wrap JSON in prose or a code fence
+  despite the prompt. `safeParse` now extracts the first balanced `{...}` block, correctly
+  handling nested objects and braces inside strings.
+- **Coach errors now report which provider failed**, not just "Gemini error".
+
+---
+
+---
+
+## v19 — sign in with an email code, set a new password from Profile
+
+No migration. One Supabase dashboard change (below), then push.
+
+### Sign in with an email link
+The sign-in screen has **"Email me a link"** next to the password option. Enter your email, tap the
+link in it, you're in. Resend unlocks after 45 seconds.
+
+**Why a link and not a 6-digit code:** Supabase's default email template contains only the link (no
+`{{ .Token }}`), and since June 2026 free projects can't edit templates without custom SMTP. The code
+flow is fully built and sitting behind one switch — if you ever add custom SMTP, set
+`EMAIL_CODES = true` at the top of `src/screens/AuthScreen.jsx` and add this to the Magic Link
+template, and the code step appears:
+
+```
+<p>Your FitArena code: <strong>{{ .Token }}</strong></p>
+<p>Or just tap this link: <a href="{{ .ConfirmationURL }}">Sign in</a></p>
+```
+
+Note: without custom SMTP, Supabase only delivers auth email to addresses in your project's team, and
+caps the default sender at a couple of messages an hour. Password sign-in is unaffected — it needs no
+email at all — so that stays the main route for the crew.
+
+### Change your password
+**Profile → Password.** Since you're already signed in, it doesn't ask for the old one — type a new
+password twice and save. Minimum 8 characters, and the button stays disabled until both fields match.
+
+Handy combination: if you ever forget your password entirely, sign in with an email code and then set
+a new password here.
+
+---
+
+---
+
+## v18 — new lotus logo + full icon set
+
+No migration. Push the code.
+
+The uploaded lotus artwork is now the app's identity. The original was a 434px PNG on a solid white
+background; it's been rebuilt as a clean asset set:
+
+- **Background removed properly.** The white was cut using connected-region detection rather than a
+  colour key, so the meditating figure (which is also white) stays fully intact — no holes, and no
+  pale halo when it sits on a dark screen.
+- **Resolution lifted** by resampling at 1600px with light unsharp before the cut, then trimming and
+  re-centring, so every size is generated from one crisp 1024px master rather than the small original.
+
+Assets in `public/icons/`:
+
+| File | Use |
+|---|---|
+| `logo.png` | 1024px transparent master — use anywhere |
+| `icon-192.png`, `icon-512.png` | PWA icons, transparent |
+| `icon-512-maskable.png` | Android maskable, dark backdrop, art inside the safe zone |
+| `apple-touch-icon.png` | iOS home screen (opaque — iOS doesn't handle transparency) |
+| `favicon-16/32.png`, `/favicon.ico` | browser tabs, cropped to the flower so it reads when tiny |
+| `icon-flower-512.png` | tighter alternative icon, no rising beads |
+| `logo-mono-white.png`, `logo-mono-ink.png` | one-colour knockouts for stamps and watermarks |
+| `og-image.png` | 1200×630 social/share card |
+
+The mark also now appears on the sign-in screen. Icon caches are stubborn: if the old icon lingers on
+your phone, remove the home-screen shortcut and re-add it after deploying.
+
+---
+
+---
+
+## v15 — flexible challenge dates, permanent global score, save-as-plan, save AI foods
+
+**Database step:** run `supabase/migration_v14.sql`. Then push.
+
+### Challenge dates are no longer fixed
+- The hardcoded 31 August date is gone everywhere. New challenges default to 30 days out.
+- **Tap the countdown** on the home screen to change the end date at any time.
+- When a challenge passes its end date, a banner appears with two choices: **Keep going**
+  (pick a new date, with 2 weeks / 30 / 60 / 90-day presets) or **Complete** it. The countdown shows
+  "Ended" / "Completed" instead of a dead zero. Existing challenges aren't touched by the migration —
+  the app asks you rather than moving your dates for you.
+
+### Permanent global score + leaderboard
+A new **Global board** (trophy icon in the Arena header, top left). Points never reset and carry
+across every challenge.
+
+| What | Points |
+|---|---|
+| Training day (lift or cardio) | +10 |
+| Streak bonus | +1 per consecutive day, capped at +15/day |
+| Weekly goal met | +25 per week |
+| Personal record / brag | +5 / +2 |
+| Streak milestones | +25 at 7 days, +100 at 30, +250 at 100 |
+
+Rest days earn nothing but protect the streak, up to **3 in a row**. A 4th straight rest day, or a day
+with nothing logged, resets it. Today never breaks your streak until the day is over. Set a
+**nickname** on the board to appear publicly; the score is recomputed from your full history each time
+(so it can't drift or double-count) and published to the shared board.
+
+### Grind: save a workout as a plan
+The workout log now has a **Save as plan** button. It turns everything logged that day into a reusable
+plan (using your top set for each exercise as the target), ready in the Planner tab.
+
+### Count: save an AI-estimated meal as a food
+After an AI estimate, tick **Save this as a food**. Give the portion weight and it's stored per 100g so
+you can re-log it later at any amount on the scale. Leave the weight blank and it's saved as one
+100 g portion. The logged entry links to the new food, so it shows up in recents too.
+
+---
+
+---
+
+## v14 — editable session timer, "last time" set hints, rest-timer limits
+
+No migration needed. Full zip.
+
+- **Edit the gym-session timer**: while a session is running, tap the pencil next to it to set the
+  time by hand (hours/minutes/seconds). It keeps counting from whatever you set — useful when you
+  forgot to start it, or forgot to stop it and it ran long.
+- **"Last time" hints while logging**: when you log an exercise you've done before, a summary shows
+  what you did last time (e.g. "25kg×12 · 30kg×10 · 35kg×8" with the date), and each active set shows
+  a small "Last time · 30kg × 10" line under the inputs so you can beat it set by set.
+- **Rest-timer limits with a red nudge**: in Profile → Rest timers, set a target for rest between sets
+  and between exercises (defaults 90s / 120s; 0 turns a limit off). When a rest runs past the limit,
+  the timer turns red and pulses ("back to it!") so you know to get moving.
+
+---
+
+---
+
+## v13 — saved-meal editing, maintenance vs goal, trends modal, Gemini 3.5 Flash
+
+**Database step:** run `supabase/migration_v13.sql` (adds `maintenance_calories`). Then push.
+
+- **Saved meals are editable**: rename a meal, change any item's grams, remove items, and add new
+  foods to an existing meal. Item changes save as you make them.
+- **Maintenance vs goal calories**: goals now hold both. The dashboard shows a bar with your net
+  calories, a marker for your goal and a marker for maintenance, plus a live "X kcal under/over
+  maintenance" read-out. Setting the goals also tells you the implied weekly pace.
+- **Tap the calorie card → trends modal**: a 7-day net-calorie chart with goal and maintenance
+  reference lines (bars turn coral above goal), averages, days logged, protein-goal hit rate, and a
+  projected kg/week based on your average deficit or surplus.
+- **Model updated to Gemini 3.5 Flash** (released at Google I/O, May 2026) with an automatic fallback
+  to 2.5 Flash if the key can't use it. Set `GEMINI_MODEL` in Vercel to pin a specific model.
+
+---
+
+---
+
+## v12 — Indian foods (IFCT 2017), calories burned, ocean Bloom
+
+**Database step:** run `supabase/migration_v12.sql` (activity/calorie-burn log). Then push.
+
+### Indian food data
+Search now looks in three places, in order: **your foods → Indian foods → Open Food Facts**, with AI
+estimate as the fallback for anything not found.
+
+- **IFCT 2017** (Indian Food Composition Tables, National Institute of Nutrition / ICMR) — 542 foods
+  with real per-100g values, bundled locally so it's instant and works offline. Regional names are
+  searchable, so "rajma", "chana", "atta", "poha" all hit the right entry.
+- **~60 common dishes** (dal tadka, butter chicken, chapati, idli, dosa, chole, biryani, paneer
+  dishes, samosa, chai…) as typical recipe values, marked `DISH` and always editable before logging.
+- Everyday aliases are mapped (besan → gram flour, moong → green gram, toor → red gram, suji →
+  semolina, dahi → curd…), and each search word can match the name *or* a regional name in any order.
+- The dataset is loaded only when you first search, so the app still starts fast (adds ~19 kB gzip).
+- Picking a dataset food saves it to your foods, so it shows up in recents and can be favourited.
+
+### Calories burned
+A new activity card on Count, right under the quick actions. Burned calories are **added back to the
+day's budget** (remaining = goal + burned − eaten), and the ring accounts for them.
+- **From workout** — reads what you logged in Grind that day (exercises, sets, top weights, session
+  minutes) and estimates the burn with AI, using your bodyweight from Profile.
+- **Describe** — "45 min football", "30 min run at 10 km/h" → AI estimate.
+- **Manual** — type the calories yourself.
+Every AI estimate is editable before saving and the numbers are deliberately conservative — training
+burns are easy to overestimate.
+
+### Bloom, recoloured
+Ocean blues (deep navy → sea blue) with soft summer washes: peach, aqua, sand-yellow, seafoam and a
+touch of periwinkle. Contrast re-checked: body text 13.6:1, accents 4.1–5.2:1.
+
+---
+
+---
+
+## v11 — Count (nutrition) foundation + plan chooser
+
+**Database step:** run `supabase/migration_v11.sql` (nutrition tables). Then push.
+No image blobs are stored — only text/number data (image_url is just a URL string from Open Food Facts).
+
+### Navigation
+- The navbar's **Profile** slot is now **Count**. Profile moved to the **avatar** in the top-left of
+  the Arena screen (tap it), and Profile has a back button.
+
+### Plan chooser (Grind)
+- Starting a plan no longer auto-runs exercises in order. It opens a **chooser**: tap whichever
+  exercise you want, and ones already logged today show a ✓ and are dimmed. Finishing one returns to
+  the chooser, so you can leave and come back and it knows what's done.
+
+### Count — what works now
+- **Dashboard**: calorie ring with "kcal left", **protein prioritized** (big mint bar with "Xg to
+  go"), carbs/fat bars. Empty states.
+- **Daily goals**: calories, protein, carbs, fat + goal type (lose/maintain/build).
+- **The draggable gram scale**: drag to set grams, tap the number to type it, ± and quick buttons,
+  live macro recalculation.
+- **Add food** via: Search (your foods + recent), Quick add (gym staples), Add/Create manually
+  (per-100g), Barcode → Open Food Facts lookup (manual entry), and **AI estimate** (describe a meal,
+  Gemini returns editable macros — needs `GEMINI_API_KEY`, already set).
+- **Review**: per-100g values (editable) → scale → live serving macros → pick meal → log.
+- **Diary**: six meal sections with per-meal kcal/protein totals, delete items.
+
+### TODO — next steps (foundation is in place / hooks ready)
+- **Live camera barcode scanning** (Barcode view currently takes manual entry; add a scanner lib + camera permission).
+- **AI photo/label scan** (snap a nutrition label → macros) and **AI goal assistant** (chat to set goals).
+- **Saved meals** (tables + RLS already exist) and **favorites UI** (table exists).
+- **Insights** (weekly protein/calorie trends) and **date navigation** on Count (currently today only).
+- **Search other users' public food DB / larger Open Food Facts search** (name search, not just barcode).
+
+---
+
+---
+
+## v11.1 — saved meals + live camera barcode scanner
+
+No new migration (uses the v11 tables). Just push.
+
+- **Saved meals**: in Count, the "Saved" quick action (and "Saved meals" in the add menu) lets you
+  build a combo — name it, add foods with grams — and then log the whole thing to any meal in one tap.
+  Delete saved meals you don't want.
+- **Live camera barcode scanning**: "Scan barcode → Scan with camera" opens the camera and reads
+  EAN/UPC barcodes (works on iOS and Android via ZXing), then looks the product up on Open Food Facts
+  and drops you into the review screen with the gram scale. If the camera is blocked or unavailable,
+  it falls back to manual barcode entry — the flow never breaks.
+
+---
+
+---
+
+## v11.2 — Count: AI label scan, AI coach, favorites, insights, date nav, OFF search
+
+No new migration (uses v11 tables). Push code. AI needs `GEMINI_API_KEY` (already set).
+
+- **Scan opens the camera immediately** now, with manual barcode entry as an option below (and the
+  automatic fallback if the camera is blocked).
+- **Search now covers scanned products + the Open Food Facts database by name** — so you can find
+  things without a barcode (e.g. "starbucks latte"). Scanned/looked-up products are cached so they're
+  searchable next time. Favorites and recent foods show when the search box is empty.
+- **Favorites**: a ★ on the review screen saves a food to favorites (and to your foods for reuse).
+- **AI (three modes)** under "Use AI": **Describe meal** (text → macros), **Scan label** (photo of a
+  nutrition label → per-100g values → review), and **Ask coach** (answers using your goals + what
+  you've logged today, e.g. "what should I eat after my workout?").
+- **Insights**: a "This week" card (avg kcal, avg protein, days logged, protein-goal hit rate, protein
+  still needed today) with a shortcut to the AI coach.
+- **Date navigation**: prev/next day arrows at the top of Count — review or back-fill any day.
+
+---
+
+---
+
+## v11.3 — customisable quick add, meal photos, better search, calendar, Bloom theme
+
+No migration needed. Push the code.
+
+- **Bloom theme** (Profile → Appearance): a soft, colourful daylight theme — pink/violet, peach and
+  mint washes with deep plum text. Dark and Light are still there; the choice sticks between visits.
+- **Quick add is yours now**: add your own items, edit any item, and remove ones you don't use
+  (including built-ins, with a one-tap "restore built-ins"). Editing a built-in saves your own copy.
+  The staples show instantly even on a slow connection.
+- **Photo in Describe meal**: attach a photo of the meal for a better AI estimate. The photo is only
+  sent for the estimate — nothing is stored.
+- **Search is much more forgiving**: word order and extra words no longer break it (each word is
+  matched against name *and* brand), and Open Food Facts is queried through two backends in parallel
+  with an automatic retry on fewer words — so results are consistent across phones and networks.
+- **Calendar date picker**: tap the date at the top of Count to jump to any past day.
+
+---
+
+---
+
+## v11.4 — Bloom recoloured, editable diary entries, My foods
+
+No migration needed. Push the code.
+
+- **Bloom is now jade sunrise + royal depth** instead of pink: deep teal/cyan primary, jade green for
+  protein, sunrise coral/amber and sage washes, with a hint of royal navy. All text and accent colours
+  were contrast-checked against the warm ivory background (body text 13:1, accents 4.1–5.0:1).
+- **Edit a logged food**: tap any item in the diary (Dinner, Breakfast, anything) to change the amount
+  on the gram scale, move it to a different meal, favourite it, or remove it. Entries with no linked
+  product (AI or photo estimates) let you edit their totals and name directly.
+- **My foods** (Add food → My foods): every food you've added, scanned-and-saved, or created as a
+  quick item, in one place — search it, tap to log, edit its per-100g values, or delete it.
+- **Favourite star fixed**: it now confirms the change against the database instead of assuming the
+  tap worked, tells you if it fails, and reuses an existing food row instead of creating duplicates.
+
+---
+
+---
+
+## v10 — plan/log unification, timers, editable sets, statistical Coach
+
+**No new database migration** for this batch. Just push the code.
+
+- **Starting a plan now logs set-by-set.** Instead of dumping identical sets, "Start" walks the plan
+  exercise-by-exercise through the real set entry — each set pre-filled with the plan's target
+  weight/reps but fully editable, and you can add or remove sets as you go.
+- **Edit anything after the fact.** Tap a logged exercise to edit each set's weight/reps, delete a
+  set, or add sets — then Save. (Whole-exercise delete still there.)
+- **Three timers.** A rest timer between sets (auto), a rest timer *between exercises* (with the next
+  exercise queued), and a full **gym-session timer** you can start manually — it also auto-starts the
+  moment you log your first set, and you stop it when you're done.
+- **Add plan exercises by body part or custom.** The plan editor's "Add exercise" now has the same
+  search + body-part tiles + custom-exercise option as logging.
+- **Coach is now statistical.** The weekly read leads with real numbers and week-over-week trends
+  (consistency %, sets this week vs last, gym-day trend, PR bests) and gives numbers-based suggestions.
+- **Invites include the app link.** Sharing a code now sends the join code *and* your app link, and
+  the sheet shows a tappable link.
+
+---
+
+---
+
+## v10.1 fixes
+
+- **Fixed Grind crash** (blank screen on plan start / stuck on the set-count step). A parameter was
+  shadowing the set-count state setter, crashing the set-entry screen. Now plan-start and normal
+  logging both open the editable set entry correctly.
+- **Fixed cross-account notifications.** If you enabled notifications as one account then switched to
+  another on the same device, the device kept getting the first account's challenge notifications.
+  The device's subscription now auto-reassigns to whoever is logged in (on app open).
+
+---
+
+---
+
+## v9 update — Liquid Glass redesign
+
+**No database step** — frontend only. Just push the code.
+
+Built with a three-layer glass system (specular highlight, blurred body, depth shadow) plus a
+subtle grain texture, applied selectively: glass for floating chrome, solid panels for data.
+
+- **Floating island nav** — the bottom bar is now a detached glass capsule hovering above the
+  page, with a liquid gold/indigo indicator that springs between tabs. Safe-area aware.
+- **Premium headers** — big titles get subtle parallax and fade as you scroll, while a condensed
+  floating glass title pill materializes at the top.
+- **Grind focus mode** — a floating **rest timer** starts automatically when you save a set;
+  bigger tap-friendly set inputs; a **"same as last"** one-tap fill; a sticky animated Finish
+  button; third stat tile; and count-up numbers. Log rows moved to solid panels for readability.
+- **Search & filters** — glass search bars with focus rings (Playbook's is sticky while you scroll).
+- **Profile hero** — gradient-ring avatar, live streak flame, count-up stat tiles (gym days,
+  PR lifts, kg change), and a 14-day activity dot strip.
+- **Motion** — check-in success stamp ("LOGGED"), screen entrance transitions, spring press
+  feedback on buttons/pills, sheet drag-handle and blurred scrim. `prefers-reduced-motion` respected.
+
+---
+
+---
+
+## v9.1 fixes
+
+- **Custom exercise button** moved to the top of Log workout (right under the search), so it's
+  visible immediately without scrolling past the body-part tiles.
+- **Resizable sheets** — every bottom sheet (Add goal, Log workout, Crew, Challenges, etc.) can now
+  be dragged by its handle to any height you like (grab and pull up/down), or dragged down to close.
+- **Opaque sheets** — sheet surfaces are now nearly solid with a stronger blurred scrim, so page
+  content (like the wins feed) no longer shows through or under an open sheet.
+- **Navbar** background opacity reduced ~15% for a lighter, more floating feel.
+
+---
+
+---
+
+## v9.2 — scroll fixes + admin controls
+
+**Database step:** run `supabase/migration_v9.sql` (adds delete-challenge and delete-post functions).
+
+- **Sheets no longer scroll-through.** Every sheet/popup now renders in a portal pinned to the
+  viewport and locks the page behind it, so scrolling stays inside the sheet and the layer below
+  never peeks through. Fixes the Playbook exercise popup that could open off-screen.
+- **Delete a challenge (creator only).** In the Crew sheet, the creator gets a "Delete this
+  challenge" button with a confirm step. Removes the challenge, its leaderboard, and its wins feed
+  for everyone; personal workout logs are kept. Enforced server-side.
+- **Moderate the wins feed.** A trash icon appears on a post if you posted it *or* you created the
+  challenge, so admins can remove inappropriate content. Also enforced server-side.
+
+---
+
+---
+
+## v8 update — custom exercises, smarter Coach, in-app help
+
+**Database step:** run `supabase/migration_v8.sql` (adds the custom-exercises table). Then push.
+
+- **Win / join notifications** were already built and are **member-only** — a win, PR, join, or
+  leaderboard overtake notifies only the other people in that same challenge, never outsiders.
+  (No change needed; they start firing now that the service-role key is set.)
+- **Custom exercises.** In Log workout there's now a **＋ Custom exercise** option: type any exercise
+  we don't have, optionally tag a body part, and log it. It's saved to your own exercise list for
+  next time (searchable and under its tile) and is **private to you** — nobody else sees it.
+- **Coach is now useful, not just a roast.** "Your week" gives an informative read plus two or three
+  concrete suggestions tied to your goals and how your week is balanced. Below it, **Ask the coach**
+  lets you type short training questions and get practical, goal-aware answers. (Still not medical
+  advice.)
+- **Help in Profile.** A new "How it works" card opens a plain-language guide to what each tab does
+  and what every Arena number means (Score, Consistency, Bonus, Streak, Rank, Crew, and more).
+
+---
+
+---
+
+## v7 update — Push notifications
+
+Real notifications for the installed (home-screen) PWA: a daily check-in reminder plus nudges
+when someone posts a win, joins, or passes you on the leaderboard. All $0.
+
+**Setup (one time):**
+
+1. **Database:** run `supabase/migration_v7.sql`.
+2. **Vercel env vars** (Settings → Environment Variables):
+   - `VITE_VAPID_PUBLIC_KEY` — the public key in `.env.example`
+   - `VAPID_PUBLIC_KEY` — same public key
+   - `VAPID_PRIVATE_KEY` — your private key (kept out of git)
+   - `VAPID_SUBJECT` — `mailto:you@example.com`
+   - `SUPABASE_URL` — your Supabase URL
+   - `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Settings → API → service_role key (server-only!)
+   - `NOTIFY_SECRET` — any long random string
+   - `REMINDER_HOUR_UTC` — optional, defaults to 16 (~18:00 Berlin in summer)
+3. **GitHub repo secrets** (for the scheduler in `.github/workflows/notify.yml`):
+   - `NOTIFY_URL` — `https://YOUR-APP.vercel.app/api/notify`
+   - `NOTIFY_SECRET` — the same string as in Vercel
+4. Push the code. In the app: Profile → **Notifications → Enable**. On iPhone you must open the
+   app from the home-screen icon first (Apple's rule).
+
+**How it works:** enabling saves a push subscription to Supabase. A GitHub Action pings
+`/api/notify` every ~20 min; that function (using the service-role key) checks for new wins, joins,
+and leaderboard overtakes since last run, sends a daily reminder at the set hour, and delivers via
+the free web-push service. Dead subscriptions are cleaned up automatically.
+
+**iPhone caveats:** works on iOS 16.4+, home-screen install only, and delivery is reliable-enough
+for reminders but not instant/guaranteed like a native app.
+
+---
+
+## How scores are calculated
+
+Each person's leaderboard score has two parts:
+
+**1. Consistency (0–100) — the base of your rank.**
+Gym days this week ÷ your weekly goal, capped at 100. A "gym day" is any day you logged as
+**Lifted** or **Cardio** (Rest, Skip, and Missed don't count as gym days). The week runs
+Monday–Sunday. Example: goal of 4, trained 3 days → 75. Train 4+ → 100.
+
+**2. Bonus (max +15) — a light topping.**
+Wins you post this week add points: a **PR** is +3, a regular **brag** is +1. The whole bonus is
+capped at +15 — deliberately small, so nobody can brag their way past people who actually show up.
+
+**Total = Consistency + Bonus.** That total sorts the leaderboard.
+
+**Streak** is separate — it's the flair number (and a tiebreaker), not added to your total.
+It counts consecutive days of activity: **Lifted, Cardio, or Rest keep it alive; a missed day
+breaks it.** So a rest day won't cost you your streak, but skipping will.
+
+**Ties** are broken in this order: total score → raw consistency ratio → longer streak → name.
+
+Everything resets each Monday, so the race restarts weekly.
+
+---
+
+---
+
+## v6 update — Light theme
+
+**No database step** — this is frontend only. Just push the code.
+
+- **Theme toggle** in Profile → Appearance (Dark / Light). Your choice is saved and reloads
+  automatically next visit (applied before first paint, so no flash).
+- **Light theme** is its own designed experience, not an inversion: soft off-white canvas, clean
+  white frosted cards with gentle shadows, spacing over heavy borders, and a **tri-accent** system —
+  indigo (primary actions, key stats), emerald (progress, wins), coral (energy, alerts). Smooth
+  cross-fade when you switch.
+- Under the hood, colours are now CSS variables, so both themes share one codebase and every
+  component adapts automatically.
+
+---
+
+---
+
+## v6 update — Crew members + richer light theme
+
+**Database step:** run `supabase/migration_v6.sql` (adds a creator-only remove function).
+
+- **Crew members view.** The "Crew" stat now shows the real number of *people* in the challenge
+  (it used to show total sessions, which was confusing). Tap it to see everyone; the challenge
+  **creator** gets a Remove button next to each other member.
+- **Fixed** literal `\uXXXX` text that was showing in a few labels (e.g. "Standings · resets Monday").
+- **Richer light theme.** Gradient-graded accents (indigo→violet primary, emerald→teal for
+  progress/wins, coral→pink for alerts) instead of flat fills, a multi-colour washed canvas, and a
+  more genuine frosted liquid-glass treatment on cards, nav, and stats. Dark theme got the same
+  subtle sheen. Both were rendered and checked in a real browser.
+
+---
+
+---
+
+## v5 update
+
+**Database step:** run `supabase/migration_v5.sql` (additive, safe). Then push the code.
+
+- **Exercise search inside the log** — after picking a body-part category, a search bar at the top
+  filters that list instantly. The main log screen also still has a "search any exercise" box.
+- **Exercise thumbnails** — a compact image sits next to each exercise name in the pickers, log
+  rows, planner, and goal search, without changing the row size.
+- **Workout Planner** — a second tab inside Grind. Build reusable templates ("Push Day", "Leg
+  Day") with exercises, sets, reps, and target weights. Edit, duplicate, or delete them, and hit
+  **Start** to review/tweak today's weights and log the whole session in one go.
+
+---
+
+---
+
+## v4 update
+
+**Database step:** run `supabase/migration_v4.sql` (additive, safe). Then push the code.
+
+- **Keep-alive (no more Supabase pauses).** A GitHub Action (`.github/workflows/keepalive.yml`)
+  pings the database once a day so the project never sleeps. One-time setup: in your GitHub repo,
+  **Settings → Secrets and variables → Actions**, add `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+  Free, runs forever.
+- **Smarter goals.** "Add goal → Track a lift" lets you search an exercise (e.g. Bench Press) and
+  set a target weight. It then **auto-tracks**: log that lift in your workout and the goal fills in;
+  hit the target and it flips to "Smashed." A "Custom" tab still covers non-lift goals (e.g. lose 3kg).
+- **Redesigned workout log.** Tap **Log workout** → pick a body-part tile (Chest, Back, Shoulders,
+  Biceps, Triceps, Legs) or search any exercise → choose set count → enter each set's weight/reps
+  one at a time (each set locks as you go). Each exercise shows as a single row; tap it for the
+  full set-by-set breakdown.
+- **Date navigation.** Arrows for previous/next day, or tap the date to open a calendar and jump to
+  any day to review (or backfill) that day's workout.
+
+### Assumptions baked in (easy to change)
+- Exercise goals track your **best logged weight** and complete at the target.
+- Each set stores **weight + optional reps**.
+- Logging the same exercise twice in one day **merges** into one row.
+
+---
+
+## Running it locally in VS Code
+
+You only need this if you want to make changes yourself. If you just use the deployed site, skip it.
+
+1. **Install Node.js** (the LTS version) from nodejs.org — this gives you `npm`.
+2. **Open the project** in VS Code: File → Open Folder → the unzipped `fitarena` folder.
+3. **Open a terminal** in VS Code (Terminal → New Terminal) and run:
+   ```bash
+   npm install        # one time — downloads dependencies
+   cp .env.example .env   # then paste your 3 keys into .env
+   npm run dev        # starts the app at http://localhost:5173
+   ```
+4. Edit files under `src/` — the browser auto-refreshes on save.
+5. **One caveat:** `npm run dev` doesn't run the `/api/coach` function, so the AI Coach tab won't
+   work locally. Either test the Coach on the deployed site, or run `npx vercel dev` instead of
+   `npm run dev` (that serves the app + the function together).
+
+To ship a change: save your files, upload the changed files to GitHub (or use VS Code's Source
+Control panel if you set up git), and Vercel redeploys automatically.
+
+---
+
+---
+
+## v3 update
+
+**One database step:** run `supabase/migration_v3.sql` in the SQL Editor (additive, safe).
+Then push the code and let Vercel redeploy.
+
+- **Installable app (PWA).** Manifest, icons, offline support. On Android: Chrome → ⋮ → Add to
+  home screen (or use pwabuilder.com to export an actual .apk). iOS: Share → Add to Home Screen.
+- **New "Grind" tab.** Private personal-goal trackers with progress bars, plus a fast set-by-set
+  workout log grouped by day. Separate from the challenge — your own training camp.
+- **Per-challenge feeds.** Wins now belong to the challenge you posted them in, so each feed is
+  exclusive. (Old wins posted before v3 won't appear in a specific feed — just repost if needed.)
+- **Fixes:** duplicate challenges in the switcher (query now filters to your own memberships);
+  the AI Coach cutting off after 1–2 words (Gemini 2.5 Flash's "thinking" was eating the token
+  budget — now disabled for these one-liners); iPhone header dropdown now a centered, tappable
+  glass pill that clears the notch (safe-area insets); Playbook filters now cascade so you never
+  hit an empty combination.
+- **Sleeker UI.** Liquid-glass surfaces (translucent, blurred) on the nav, sheets, header, and
+  stat strips.
+
+---
+
+---
+
+## v2 update — what changed
+
+**You only need to run one thing to upgrade your live app:** open Supabase → SQL Editor,
+paste all of `supabase/migration_v2.sql`, and Run. It only *adds* columns/tables, so your
+existing accounts, challenges, and check-ins are untouched. Then push the new code to GitHub
+(Vercel redeploys automatically).
+
+New in v2:
+- **Multiple challenges.** Each has its own name, end date, and goal. Tap the challenge name
+  at the top of the Arena to switch, create, or join another. You only ever see challenges
+  you're a member of. *(This also fixes "friends don't show up" — everyone just joins the
+  same challenge with one shared code instead of each starting their own.)*
+- **Submit button on the daily check-in.** Pick one option, hit Submit — it saves and stays
+  put after a refresh.
+- **Wins feed (brags + PRs).** Post a quick brag (text + optional photo) or a personal record
+  (exercise + weight/reps). Friends in the challenge see them in the Arena feed. Your PR bests
+  show on your Profile.
+- **Light-touch scoring.** Rank = consistency (0–100) + a capped bonus (+3 per PR, +1 per brag,
+  max +15 a week). Training still wins; wins just give a nudge.
+- **Multi-select goals** on the Profile.
+- **Quota-safe Coach.** It no longer fires on every tab open — it caches the day's take and
+  only calls when you tap the button. If Google's free tier is cooling down, you get a friendly
+  "catching his breath" message with a countdown instead of a red error.
+
+### About the photo uploads (optional)
+The migration auto-creates a public `wins` storage bucket with the right permissions, so brag
+photos work out of the box. Text-only brags work regardless — if a photo ever fails to upload,
+the brag still posts.
+
+### About the Coach "quota exceeded" error you saw
+That was the **free Gemini tier's rate limit**, not a bug and not a charge — it resets on its
+own. v2's caching + on-demand calls keep usage tiny for a small group. If you ever outgrow the
+free tier, switch one line in `api/coach.js` to a paid model.
+
+---
