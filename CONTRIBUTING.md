@@ -10,7 +10,15 @@ want to change something, these are the things worth knowing.
    the screens you touched.
 2. If you added a table or column, add a numbered migration in `supabase/`. Do not edit an
    existing migration, since other people have already run it.
-3. Add an entry to `CHANGELOG.md` saying what changed and whether a migration is needed.
+3. **New tables need explicit grants.** Since 30 Oct 2026 Supabase no longer auto-grants
+   Data API access to new tables, so a table without grants returns "permission denied"
+   to the app. Put these in the same migration that creates the table, and turn RLS on:
+   ```sql
+   grant select on public.your_table to anon;
+   grant select, insert, update, delete on public.your_table to authenticated;
+   grant select, insert, update, delete on public.your_table to service_role;
+   ```
+4. Add an entry to `CHANGELOG.md` saying what changed and whether a migration is needed.
 
 ## House rules
 

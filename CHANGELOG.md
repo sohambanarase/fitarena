@@ -4,6 +4,27 @@ Newest first. Each entry says what changed and whether a Supabase migration is n
 
 ---
 
+## v23 — explicit Data API grants (Supabase change, 30 Oct 2026)
+
+**Database step:** run `supabase/migration_v16.sql`. Optional on the existing live project,
+required for any fresh setup.
+
+From 30 Oct 2026 Supabase stops auto-granting Data API access to new tables in `public`.
+Existing projects keep their grants, so the live app is unaffected. But every table in this
+repo relied on the old auto-grant, which meant a fresh setup (new project, preview branch,
+local `db reset`) would have returned "permission denied" on all 21 tables.
+
+`migration_v16.sql` grants `select` to `anon` and full CRUD to `authenticated` and
+`service_role` on every table. It skips tables that don't exist and is safe to re-run.
+RLS still scopes rows; every policy needs a signed-in user, so `anon` sees no rows.
+
+Tested on Postgres 16: grants land on all tables, `anon` gets select only, a missing table
+is skipped with a notice, and a second run is a no-op.
+
+CONTRIBUTING now says new tables must ship with their own grants.
+
+---
+
 ## v22 — fixing "Couldn't estimate that. Add quantities."
 
 **No migration. No frontend change.** All in `/api`.
