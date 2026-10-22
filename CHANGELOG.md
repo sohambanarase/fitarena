@@ -4,6 +4,18 @@ Newest first. Each entry says what changed and whether a Supabase migration is n
 
 ---
 
+## v24 — Global Board now counts PRs and brags
+
+**No migration.** One-line fix in `src/lib/globalScore.js`.
+
+The permanent score asked for a table called `wins`, which doesn't exist (the table is
+`achievements`; `wins` is only the name of the photo storage bucket). The request failed
+quietly, so PRs (+5) and brags (+2) never reached the Global Board. The weekly crew board
+was unaffected. Points recompute from full history, so past PRs and brags show up the next
+time each person opens the app.
+
+---
+
 ## v23 — explicit Data API grants (Supabase change, 30 Oct 2026)
 
 **Database step:** run `supabase/migration_v16.sql`. Optional on the existing live project,

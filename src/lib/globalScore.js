@@ -6,7 +6,7 @@ import { computeScore } from "./score.js";
 export async function loadMyHistory(userId) {
   const [{ data: logs }, { data: wins }, { data: profile }] = await Promise.all([
     supabase.from("daily_logs").select("log_date, workout_type").eq("user_id", userId),
-    supabase.from("wins").select("kind").eq("user_id", userId),
+    supabase.from("achievements").select("kind").eq("user_id", userId),
     supabase.from("profiles").select("weekly_goal, name").eq("id", userId).maybeSingle(),
   ]);
   return { logs: logs || [], wins: wins || [], weeklyGoal: profile?.weekly_goal ?? 4, name: profile?.name || null };
