@@ -106,6 +106,13 @@ function mapOff(p, barcode) {
   };
 }
 export async function lookupBarcode(barcode) {
+  // Our own foods first: anything already saved with this barcode (yours, or the shared
+  // Open Food Facts cache). This is what makes a product you added once with AI scan
+  // instantly next time, even though Open Food Facts doesn't know it.
+  try {
+    const { data: known } = await supabase.from("foods").select("*").eq("barcode", barcode).limit(1).maybeSingle();
+    if (known) return known;
+  } catch { /* fall through to Open Food Facts */ }
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
@@ -202,7 +209,7 @@ export async function ensureFood(userId, food) {
   if (food.barcode) { const { data: byCode } = await supabase.from("foods").select("*").eq("barcode", food.barcode).limit(1).maybeSingle(); if (byCode) return byCode; }
   const { data: byName } = await supabase.from("foods").select("*").eq("user_id", userId).ilike("name", (food.name || "").trim()).limit(1).maybeSingle();
   if (byName) return byName;
-  const { data } = await addFood({ user_id: userId, source: food.source || "custom", name: food.name, brand: food.brand || null,
+  const { data } = await addFood({ user_id: userId, source: food.source || "custom", name: food.name, brand: food.brand || null, barcode: food.barcode || null,
     calories_per_100g: food.calories_per_100g, protein_per_100g: food.protein_per_100g, carbs_per_100g: food.carbs_per_100g, fat_per_100g: food.fat_per_100g,
     sugar_per_100g: food.sugar_per_100g, salt_per_100g: food.salt_per_100g, fiber_per_100g: food.fiber_per_100g, serving_size: food.serving_size || null });
   return data || food;

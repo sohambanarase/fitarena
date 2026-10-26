@@ -4,6 +4,32 @@ Newest first. Each entry says what changed and whether a Supabase migration is n
 
 ---
 
+## v25 — AI analyse in the barcode scanner
+
+**No migration.** Uses the existing `foods.barcode` column.
+
+When a barcode doesn't scan or isn't in Open Food Facts, the scan screen now offers
+**AI analyse instead**. Snap the nutrition label or just the front of the pack:
+
+- **Label visible:** AI reads the per-100g values exactly.
+- **Only the pack:** AI recognises the product and gives typical values, and the review
+  screen says so in a gold note, asking you to check the pack.
+
+Either way it lands on the normal review screen, where every value is editable before you add it.
+
+The button shows in three places: under the live camera, on the "camera unavailable" screen,
+and in a panel under manual entry that lights up when a lookup finds nothing.
+
+**Barcodes are remembered.** The barcode you scanned or typed is saved with the food, and
+`lookupBarcode` now checks your saved foods before Open Food Facts. So a product you added
+once with AI scans instantly next time. This also fixes `ensureFood`, which wasn't saving
+barcodes at all before.
+
+New API mode: `POST /api/nutrition {mode:"product", image}` returns per-100g values plus
+`from_label`. The existing `label` mode is unchanged.
+
+---
+
 ## v24 — Global Board now counts PRs and brags
 
 **No migration.** One-line fix in `src/lib/globalScore.js`.

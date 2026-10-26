@@ -583,24 +583,57 @@ function BarcodeView({ onPick }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [notFound, setNotFound] = useState(false);
   const [mode, setMode] = useState("scan"); // scan | manual
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
   async function lookup(bc) {
     const c = (bc || code).trim();
     if (!c) return;
-    setMode("manual"); setBusy(true); setErr(null);
+    setMode("manual"); setBusy(true); setErr(null); setNotFound(false);
     const food = await lookupBarcode(c);
     setBusy(false);
-    if (!food) { setErr("We couldn't find this product. Add it manually, use AI, or search food."); return; }
+    if (!food) { setNotFound(true); setErr("We couldn't find this product. Let AI read the pack below, or add it manually."); return; }
     onPick(food);
   }
-  if (mode === "scan") return <CameraScanner onDetected={(bc) => { setCode(bc); lookup(bc); }} onClose={() => setMode("manual")} />;
+  // AI analyse: photo of the label or the pack front -> per-100g values -> the normal
+  // review screen, where everything is editable. The barcode rides along, so once the
+  // food is saved, scanning the same product next time finds it straight away.
+  async function analyse(file) {
+    if (!file) return;
+    setMode("manual"); setAiBusy(true); setAiErr(null);
+    try {
+      const b64 = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file); });
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "product", image: b64, mimeType: file.type || "image/jpeg" }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { setAiErr(j.error || "Couldn't work out that product."); setAiBusy(false); return; }
+      const { from_label, ...food } = j.food;
+      const bc = code.trim();
+      onPick({ ...food, source: "ai", name: food.name || "Scanned product", barcode: bc || null, aiEstimated: from_label === false, aiFromPhoto: true });
+    } catch { setAiErr("AI is offline right now. Add it manually instead."); }
+    setAiBusy(false);
+  }
+  const aiButton = (big) => (
+    <label className={(big ? "btn-primary py-3" : "pill py-2.5") + " flex w-full cursor-pointer items-center justify-center gap-2" + (aiBusy ? " opacity-60" : "")}>
+      <Sparkles size={16} /> {aiBusy ? "Analysing…" : "AI analyse instead"}
+      <input type="file" accept="image/*" capture="environment" className="hidden" disabled={aiBusy} onChange={(e) => { analyse(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+    </label>
+  );
+  if (mode === "scan") return <CameraScanner onDetected={(bc) => { setCode(bc); lookup(bc); }} onClose={() => setMode("manual")} footer={aiButton(false)} />;
   return (
     <div className="space-y-3">
-      <button onClick={() => { setErr(null); setMode("scan"); }} className="btn-primary flex w-full items-center justify-center gap-2 py-3"><Camera size={18} /> Scan with camera</button>
+      <button onClick={() => { setErr(null); setNotFound(false); setMode("scan"); }} className="btn-primary flex w-full items-center justify-center gap-2 py-3"><Camera size={18} /> Scan with camera</button>
       <p className="text-center text-[11px] text-muted">or enter the barcode manually (works if the camera is blocked)</p>
       <div className="search-glass"><Barcode size={18} className="text-muted" /><input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter barcode number" className="w-full bg-transparent outline-none placeholder:text-muted" /></div>
       {err && <p className="text-sm text-ember">{err}</p>}
       <button className="btn-primary w-full" disabled={!code.trim() || busy} onClick={() => lookup()}>{busy ? "Looking up…" : "Look up product"}</button>
+
+      <div className={"panel space-y-2 " + (notFound ? "ring-2 ring-gold/70" : "")}>
+        <p className="flex items-center gap-1.5 font-bold"><Sparkles size={15} className="text-gold" /> No luck with the barcode?</p>
+        <p className="text-[11px] text-muted">Snap the nutrition label, or the front of the pack. AI fills in the values and you check them before saving.{code.trim() ? " We'll remember this barcode for next time." : ""}</p>
+        {aiButton(notFound)}
+        {aiErr && <p className="text-sm text-ember">{aiErr}</p>}
+      </div>
     </div>
   );
 }
@@ -824,6 +857,13 @@ function ReviewFood({ food, meal, setMeal, userId, onAdd }) {
         <button onClick={toggleFav} disabled={favBusy} aria-label="Favorite" className="shrink-0 active:scale-90 disabled:opacity-50"><Star size={22} className={fav ? "fill-gold text-gold" : "text-muted"} /></button>
       </div>
       {favErr && <p className="text-[11px] text-ember">{favErr}</p>}
+      {food.aiFromPhoto && (
+        <p className={"rounded-xl px-3 py-2 text-[11px] " + (food.aiEstimated ? "bg-gold/10 text-gold" : "bg-mint/10 text-mint")}>
+          {food.aiEstimated
+            ? "AI recognised the product but couldn't see a nutrition label, so these are typical values. Check the pack and tap edit values if they're off."
+            : "AI read these from the label. Give them a quick check against the pack before adding."}
+        </p>
+      )}
 
       <div className="panel">
         <div className="mb-1.5 flex items-center justify-between"><p className="eyebrow">Per 100g{f.source === "recipe" ? " · typical recipe" : f.source === "ifct" ? " · IFCT 2017" : ""}</p><button onClick={() => setEdit(!edit)} className="pill">{edit ? "done" : "edit values"}</button></div>

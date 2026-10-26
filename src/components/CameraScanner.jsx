@@ -5,7 +5,8 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 // Live barcode scanner. Cross-browser (iOS + Android) via ZXing.
 // If the camera can't start or permission is denied, it surfaces a friendly
 // message and hands back to manual entry — it never blocks the flow.
-export default function CameraScanner({ onDetected, onClose }) {
+// `footer` is an optional extra action (the Count screen passes its AI analyse button).
+export default function CameraScanner({ onDetected, onClose, footer }) {
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const doneRef = useRef(false);
@@ -48,6 +49,7 @@ export default function CameraScanner({ onDetected, onClose }) {
             : "Couldn't start the camera on this device. Enter the barcode manually instead."}
         </p>
         <button onClick={onClose} className="btn-primary w-full">Enter barcode manually</button>
+        {footer}
       </div>
     );
   }
@@ -60,6 +62,7 @@ export default function CameraScanner({ onDetected, onClose }) {
       </div>
       <p className="text-center text-sm text-muted">Point at the barcode and hold steady.</p>
       <button onClick={onClose} className="pill mx-auto block px-6 py-2">Cancel / enter manually</button>
+      {footer}
     </div>
   );
 }

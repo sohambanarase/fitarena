@@ -1,5 +1,6 @@
 // /api/nutrition.js — AI-backed nutrition helper.
 // modes: "estimate" (meal text -> macros), "label" (label photo -> per-100g macros),
+//        "product" (label OR pack-front photo -> per-100g, flags whether it was read or estimated),
 //        "assist" (question + today's context -> short answer).
 import { generate, anyConfigured } from "./_ai.js";
 
@@ -12,6 +13,7 @@ export default async function handler(req, res) {
   const mode = b.mode || "estimate";
   try {
     if (mode === "label") return await labelScan(b, key, res);
+    if (mode === "product") return await productScan(b, key, res);
     if (mode === "assist") return await assist(b, key, res);
     if (mode === "burn") return await burn(b, key, res);
     return await estimate(b, key, res);
@@ -124,6 +126,29 @@ async function labelScan(b, key, res) {
   if (out.blocked) return res.status(200).json({ ok: false, error: "That image was blocked. Try another photo." });
   if (!out.ok) return res.status(200).json({ ok: false, error: failMessage(out.failed, "Couldn't read that label. Try a clearer, straight-on photo.") });
   return res.status(200).json({ ok: true, food: out.data });
+}
+
+// "AI analyse" from the barcode screen: the product wasn't in Open Food Facts, so the user
+// photographs either the nutrition label or the front of the pack. A visible label is read
+// exactly. Without one, the model names the product and gives typical values, and says so
+// with from_label:false, so the review screen can tell the user to double-check.
+async function productScan(b, key, res) {
+  const image = (b.image || "").toString();
+  const mimeType = b.mimeType || "image/jpeg";
+  if (!image) return res.status(400).json({ error: "No image provided." });
+  const prompt = [
+    "This is a photo of a packaged food product: either its nutrition label or the front of the pack.",
+    "If a nutrition table is visible, read the per-100g values exactly (convert from per-serving if only that is shown, using the serving size). Set from_label to true.",
+    "If no nutrition table is visible, identify the product from the packaging (brand, product name, flavour) and give typical per-100g values for that product. Set from_label to false.",
+    "Return ONLY compact JSON, no markdown: {\"name\":<string>,\"brand\":<string or null>,\"from_label\":<true|false>,\"calories_per_100g\":<num>,\"protein_per_100g\":<num>,\"carbs_per_100g\":<num>,\"fat_per_100g\":<num>,\"sugar_per_100g\":<num or null>,\"salt_per_100g\":<num or null>,\"fiber_per_100g\":<num or null>,\"serving_size\":<num grams or null>}.",
+    "If the photo is not a food product, or you cannot tell what it is, return {\"calories_per_100g\":null}.",
+  ].join("\n");
+  const out = await askJSON(key, [{ text: prompt }, { inlineData: { mimeType, data: image } }], 500, (p) => p.calories_per_100g != null);
+  if (out.busy) return res.status(200).json({ ok: false, error: "AI is busy right now. Try again shortly." });
+  if (out.blocked) return res.status(200).json({ ok: false, error: "That image was blocked. Try another photo." });
+  if (!out.ok) return res.status(200).json({ ok: false, error: failMessage(out.failed, "Couldn't work out that product. Try a photo of the nutrition label.") });
+  const f = out.data;
+  return res.status(200).json({ ok: true, food: { ...f, from_label: f.from_label !== false } });
 }
 
 async function assist(b, key, res) {
