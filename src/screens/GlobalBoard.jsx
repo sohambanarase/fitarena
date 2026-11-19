@@ -5,9 +5,9 @@ import ScreenHeader from "../components/ScreenHeader.jsx";
 import Loader from "../components/Loader.jsx";
 import Sheet from "../components/Sheet.jsx";
 import CountUp from "../components/CountUp.jsx";
-import { loadMyHistory, syncMyScore, loadLeaderboard, loadMyScoreRow, setNickname } from "../lib/globalScore.js";
-import { computeScore, streakState, POINTS, REST_ALLOWANCE, MILESTONES } from "../lib/score.js";
-import { ChevronLeft, Trophy, Flame, Pencil, Info } from "lucide-react";
+import { loadMyHistory, syncMyScore, loadLeaderboard, loadMyScoreRow, setNickname, loadBoardHistory } from "../lib/globalScore.js";
+import { computeScore, streakState, scoreTimeline, iso, POINTS, REST_ALLOWANCE, MILESTONES } from "../lib/score.js";
+import { ChevronLeft, ChevronRight, Trophy, Flame, Pencil, Info, Dumbbell, HeartPulse, Coffee, Minus } from "lucide-react";
 
 export default function GlobalBoard() {
   const { user } = useAuth();
@@ -18,6 +18,7 @@ export default function GlobalBoard() {
   const [rest, setRest] = useState(null);
   const [editing, setEditing] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [viewing, setViewing] = useState(null);   // board row whose history is open
 
   const load = useCallback(async () => {
     try {
@@ -78,7 +79,8 @@ export default function GlobalBoard() {
             {board.map((r) => {
               const isMe = r.user_id === user.id;
               return (
-                <div key={r.user_id} className={"flex items-center gap-3 rounded-xl px-3 py-2.5 " + (isMe ? "border border-gold/40 bg-gold/10" : "panel")}>
+                <button key={r.user_id} type="button" onClick={() => setViewing(r)} aria-label={"See how " + (r.nickname || "this player") + " got their points"}
+                  className={"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left active:scale-[.98] " + (isMe ? "border border-gold/40 bg-gold/10" : "panel")}>
                   <span className={"w-7 shrink-0 font-score text-sm font-bold " + (r.rank <= 3 ? "text-gold" : "text-muted")}>#{r.rank}</span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-bold">{r.nickname || "Anonymous"}{isMe ? " (you)" : ""}</p>
@@ -88,16 +90,18 @@ export default function GlobalBoard() {
                     <p className="font-score font-bold text-gold">{r.points}</p>
                     {r.current_streak > 0 && <p className="text-[10px] text-mint">🔥 {r.current_streak}</p>}
                   </div>
-                </div>
+                  <ChevronRight size={15} className="shrink-0 text-muted" />
+                </button>
               );
             })}
           </div>
         )}
-        <p className="mt-2 text-[11px] text-muted">Points never reset. They keep adding up across every challenge you run.</p>
+        <p className="mt-2 text-[11px] text-muted">Points never reset. They keep adding up across every challenge you run. Tap anyone to see exactly how they got their points.</p>
       </div>
 
       {editing && <NicknameSheet userId={user.id} current={mine?.nickname} onClose={() => setEditing(false)} onSaved={load} />}
       {showRules && <RulesSheet score={score} onClose={() => setShowRules(false)} />}
+      {viewing && <HistorySheet row={viewing} isMe={viewing.user_id === user.id} onRules={() => { setViewing(null); setShowRules(true); }} onClose={() => setViewing(null)} />}
     </div>
   );
 }
@@ -166,4 +170,105 @@ function RulesSheet({ score, onClose }) {
 }
 function Row({ label, value }) {
   return <div className="flex items-center justify-between"><span className="text-muted">{label}</span><span className="font-score font-bold">{value}</span></div>;
+}
+
+/* ---------- tap a name: day-by-day points ---------- */
+const DAYS_SHOWN = 10;
+const TYPE = {
+  lift: { label: "Lifted", Icon: Dumbbell, cls: "bg-gold/15 text-gold" },
+  cardio: { label: "Cardio", Icon: HeartPulse, cls: "bg-mint/15 text-mint" },
+  rest: { label: "Rest", Icon: Coffee, cls: "bg-surface2 text-muted" },
+};
+function dayLabel(d, today) {
+  const [y, m, dd] = d.split("-").map(Number);
+  const dt = new Date(y, m - 1, dd), t = new Date(today + "T00:00:00");
+  const diff = Math.round((t - dt) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return dt.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function HistorySheet({ row, isMe, onRules, onClose }) {
+  const [state, setState] = useState({ loading: true });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let h = await loadBoardHistory(row.user_id);
+      if (!h && isMe) h = await loadMyHistory(row.user_id);   // your own history never needs the function
+      if (!alive) return;
+      if (!h) { setState({ error: true }); return; }
+      setState({ tl: scoreTimeline(h.logs, h.wins, h.weeklyGoal), goal: h.weeklyGoal });
+    })().catch(() => alive && setState({ error: true }));
+    return () => { alive = false; };
+  }, [row.user_id, isMe]);
+
+  const name = row.nickname || "Anonymous";
+  const today = iso(new Date());
+  const tl = state.tl;
+  const recent = tl ? tl.days.slice(-DAYS_SHOWN).reverse() : [];
+  const recentPts = recent.reduce((a, d) => a + d.total, 0);
+  const earlier = tl ? tl.total - recentPts : 0;
+  const stale = tl && tl.total !== row.points;
+
+  return (
+    <Sheet title={name + (isMe ? " (you)" : "")} onClose={onClose}>
+      <div className="space-y-3">
+        {state.loading && <Loader label="Adding up points…" />}
+        {state.error && (
+          <p className="rounded-xl bg-surface2 p-3 text-sm text-muted">Couldn't load {isMe ? "your" : "their"} history right now. Check your connection and try again.</p>
+        )}
+        {tl && (
+          <>
+            <div className="card flex items-center gap-4">
+              <div className="text-center">
+                <p className="font-score text-3xl font-bold text-gold">{tl.total}</p>
+                <p className="text-[10px] text-muted">total points</p>
+              </div>
+              <p className="min-w-0 flex-1 text-[12px] text-muted">
+                Worked out on your phone from {isMe ? "your" : "their"} check-ins, with the same rules for everyone. Nobody can add points by hand.
+                {" "}Weekly goal: {state.goal} gym days.
+              </p>
+            </div>
+            {stale && (
+              <p className="rounded-xl bg-gold/10 px-3 py-2 text-[11px] text-gold">
+                The board shows {row.points}. It refreshes when {isMe ? "you open" : name + " opens"} the board, so it can lag behind the latest check-ins.
+              </p>
+            )}
+
+            <p className="eyebrow">Last {DAYS_SHOWN} days</p>
+            <div className="space-y-1.5">
+              {recent.map((d) => {
+                const t = TYPE[d.type];
+                return (
+                  <div key={d.date} className="panel px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className={"grid h-7 w-7 shrink-0 place-items-center rounded-lg " + (t ? t.cls : "bg-surface2 text-muted")}>{t ? <t.Icon size={14} /> : <Minus size={14} />}</span>
+                      <p className="min-w-0 flex-1 truncate text-sm font-bold">{dayLabel(d.date, today)} <span className="font-semibold text-muted">· {t ? t.label : "No check-in"}</span></p>
+                      <p className={"font-score text-sm font-bold " + (d.total ? "text-gold" : "text-muted")}>{d.total ? "+" + d.total : "0"}</p>
+                    </div>
+                    {(d.items.length > 0 || d.note) && (
+                      <div className="mt-1.5 space-y-0.5 pl-9 text-[12px]">
+                        {d.items.map((i, k) => (
+                          <div key={k} className="flex justify-between gap-2"><span className="text-muted">{i.label}</span><span className="font-score font-bold">+{i.pts}</span></div>
+                        ))}
+                        {d.note && <p className={d.note.includes("reset") ? "text-ember" : "text-muted"}>{d.note}</p>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {recent.length === 0 && <p className="text-sm text-muted">No check-ins yet.</p>}
+            </div>
+
+            <div className="card space-y-1 text-[12px]">
+              <div className="flex justify-between"><span className="text-muted">Last {DAYS_SHOWN} days</span><span className="font-score font-bold">{recentPts}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Everything before that</span><span className="font-score font-bold">{earlier}</span></div>
+              <div className="flex justify-between border-t border-line pt-1"><span className="font-bold">Total</span><span className="font-score font-bold text-gold">{tl.total}</span></div>
+            </div>
+            <button onClick={onRules} className="pill mx-auto block">How points work</button>
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
 }

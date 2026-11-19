@@ -51,8 +51,7 @@ function mondayOf(isoDate) {
  */
 export function computeScore(logs = [], wins = [], weeklyGoal = 4, ref = new Date()) {
   const today = iso(ref);
-  const byDate = new Map();
-  logs.forEach((l) => { if (l && l.log_date) byDate.set(l.log_date, l.workout_type); });
+  const byDate = mergeDays(logs);
 
   const empty = {
     points: 0, currentStreak: 0, bestStreak: 0, activeDays: 0, restDays: 0,
@@ -106,6 +105,77 @@ export function computeScore(logs = [], wins = [], weeklyGoal = 4, ref = new Dat
     milestonesHit,
     breakdown: { activity, streak: streakPts, weekly, wins: w.winPts, milestones: milestonePts },
   };
+}
+
+// One entry per date. If a day has several check-ins (say, in two challenges), a gym
+// session beats a rest day, so the result never depends on database row order.
+function mergeDays(logs = []) {
+  const rank = (t) => (GYM.has(t) ? 2 : t === "rest" ? 1 : 0);
+  const byDate = new Map();
+  (logs || []).forEach((l) => {
+    if (!l || !l.log_date) return;
+    const prev = byDate.get(l.log_date);
+    if (prev === undefined || rank(l.workout_type) > rank(prev)) byDate.set(l.log_date, l.workout_type);
+  });
+  return byDate;
+}
+
+/**
+ * Day-by-day version of computeScore, for the "how did they get these points" view.
+ * Walks the exact same rules and says why each point was given. The days' totals always
+ * add up to computeScore(...).points (there's a test for that).
+ *
+ * Returns { days: [{ date, type, items: [{ label, pts }], total, note }], total }
+ * oldest first. Weekly goal points land on the day the goal was reached.
+ */
+export function scoreTimeline(logs = [], wins = [], weeklyGoal = 4, ref = new Date()) {
+  const today = iso(ref);
+  const byDate = mergeDays(logs);
+  const winsByDate = new Map();
+  (wins || []).forEach((w) => {
+    if (!w) return;
+    let d = w.log_date || today;
+    if (d > today) d = today;
+    if (!winsByDate.has(d)) winsByDate.set(d, []);
+    winsByDate.get(d).push(w.kind === "pr" ? "pr" : "brag");
+  });
+  const starts = [...byDate.keys(), ...winsByDate.keys()].sort();
+  if (!starts.length) return { days: [], total: 0 };
+
+  const goal = Math.max(1, weeklyGoal);
+  const gymByWeek = {};
+  let cursor = starts[0], streak = 0, restRun = 0, total = 0;
+  const days = [];
+  while (cursor <= today) {
+    const type = byDate.get(cursor) || null;
+    const items = [];
+    let note = null;
+    if (type && GYM.has(type)) {
+      restRun = 0; streak += 1;
+      items.push({ label: type === "cardio" ? "Cardio day" : "Training day", pts: POINTS.activeDay });
+      const bonus = Math.min(streak * POINTS.streakPerDay, POINTS.streakBonusCap);
+      items.push({ label: "Streak bonus · day " + streak + (bonus === POINTS.streakBonusCap ? " (max)" : ""), pts: bonus });
+      if (MILESTONES[streak]) items.push({ label: streak + "-day streak milestone", pts: MILESTONES[streak] });
+      const wk = mondayOf(cursor);
+      gymByWeek[wk] = (gymByWeek[wk] || 0) + 1;
+      if (gymByWeek[wk] === goal) items.push({ label: "Weekly goal hit · " + goal + " of " + goal, pts: POINTS.weeklyGoal });
+    } else if (type === "rest") {
+      restRun += 1;
+      if (restRun > REST_ALLOWANCE) { streak = 0; note = "Rest day " + restRun + " in a row · streak reset"; }
+      else note = streak > 0 ? "Rest day · streak safe (" + restRun + " of " + REST_ALLOWANCE + ")" : "Rest day";
+    } else if (cursor !== today) {
+      note = streak > 0 ? "Nothing logged · streak reset" : "Nothing logged";
+      streak = 0; restRun = 0;
+    } else {
+      note = "Nothing logged yet today";
+    }
+    (winsByDate.get(cursor) || []).forEach((k) => items.push(k === "pr" ? { label: "Personal record", pts: POINTS.pr } : { label: "Brag posted", pts: POINTS.brag }));
+    const dayTotal = items.reduce((a, i) => a + i.pts, 0);
+    total += dayTotal;
+    days.push({ date: cursor, type, items, total: dayTotal, note });
+    cursor = addDays(cursor, 1);
+  }
+  return { days, total };
 }
 
 function winPoints(wins = []) {

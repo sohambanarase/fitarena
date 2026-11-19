@@ -4,6 +4,35 @@ Newest first. Each entry says what changed and whether a Supabase migration is n
 
 ---
 
+## v26 — Global Board: tap a name to see how they got their points
+
+**Database step:** run `supabase/migration_v17.sql`.
+
+Tap anyone on the Global Board to see their last 10 days, one row per day. Each day lists
+what it earned: training day +10, streak bonus, weekly goal +25, milestones, PRs (+5) and
+brags (+2). It also shows rest days that kept the streak safe and missed days that reset it.
+At the bottom it shows those 10 days, everything before that, and the total.
+
+**Why it's trustworthy:** the points are recalculated on the viewer's own phone from the
+person's raw check-ins, using the same code that builds the board. The sheet says so. If
+the board number is older than the recalculated one, a note explains that the board catches
+up when that person next opens it.
+
+**What's shared:** `board_history()` lets signed-in users read the scoring inputs of people
+who are on the board (have a nickname): check-in dates and types, PR/brag dates, and the
+weekly goal. It shares no notes, PR text, photos, food, water or weight. People not on the
+board return nothing, and signed-out users are refused.
+
+**Under the hood:** `scoreTimeline()` in `score.js` walks the same rules as `computeScore()`
+day by day. A test over 3,000 random histories checks that the days always add up to the board
+total. When a day has check-ins in two challenges, a gym session now wins over a rest day,
+so the score no longer depends on database row order.
+
+Before the migration is run, your own history still works and others show a short
+"couldn't load" message.
+
+---
+
 ## v25 — AI analyse in the barcode scanner
 
 **No migration.** Uses the existing `foods.barcode` column.
